@@ -35,16 +35,17 @@
     <string name="help_footer" translatable="false">%1$s %2$s · %3$s\n%4$s\n\n%5$s</string>
     <string-array name="help_titles">
         <item>Four pages</item>
-        <item>Mark and open</item>
+        <item>Open and mark</item>
         <item>Menu and actions</item>
         <item>Folder tree</item>
         <item>Access</item>
     </string-array>
     <string-array name="help_bodies">
         <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
-        <item>Tap a row to mark it. Double tap opens a folder, or a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up.</item>
-        <item>Hold a row and release without moving: menu with copy, move, delete to the other side. Hold a row and drag sideways: scrolls a long name. Marked items also have buttons at the bottom.</item>
+        <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. Mark with the check box on the left.</item>
+        <item>Hold a row: menu with \"Open with\", copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
         <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page.</item>
         <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
     </string-array>
+    <string name="open_with">Open with…</string>
 </resources>

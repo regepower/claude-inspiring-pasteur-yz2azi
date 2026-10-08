@@ -28,16 +28,17 @@
     <string name="help_collapsed">zugeklappt</string>
     <string-array name="help_titles">
         <item>Vier Seiten</item>
-        <item>Markieren und öffnen</item>
+        <item>Öffnen und markieren</item>
         <item>Menü und Aktionen</item>
         <item>Ordnerbaum</item>
         <item>Zugriff</item>
     </string-array>
     <string-array name="help_bodies">
         <item>Nach links und rechts wischen (oder die Tabs antippen): Ordnerbaum der Quelle, Dateien der Quelle, Dateien des Ziels, Ordnerbaum des Ziels. Kopieren, Verschieben und Löschen gehen immer von der markierten Seite zur anderen Seite.</item>
-        <item>Zeile antippen = markieren. Doppeltipp öffnet einen Ordner oder eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben.</item>
-        <item>Zeile halten und ohne Bewegung loslassen: Menü mit Kopieren, Verschieben, Löschen zur anderen Seite. Zeile halten und seitlich ziehen: schiebt einen langen Namen. Bei markierten Einträgen gibt es unten auch Schaltflächen.</item>
+        <item>Zeile antippen = öffnen: ein Ordner öffnet sich in der Liste, eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben. Markiert wird mit dem Häkchen links.</item>
+        <item>Zeile halten: Menü mit \"Öffnen mit\", Kopieren, Verschieben, Löschen (zur anderen Seite). Bei markierten Einträgen gibt es unten auch Schaltflächen. Mit zwei Fingern seitlich ziehen: alle langen Namen scrollen, Symbole und Häkchen bleiben stehen. Ein Finger wischt weiter die Seiten.</item>
         <item>Pfeil antippen klappt einen Ordner auf. Namen antippen wählt ihn aus: seine Dateien erscheinen auf der nächsten Seite.</item>
         <item>Die App braucht \"Zugriff auf alle Dateien\". Beim ersten Start öffnet sich die Systemeinstellung. Nichts verlässt dein Handy.</item>
     </string-array>
+    <string name="open_with">Öffnen mit…</string>
 </resources>
