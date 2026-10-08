@@ -18,6 +18,7 @@ import android.os.SystemClock
 import android.os.storage.StorageManager
 import android.provider.Settings
 import android.text.TextUtils
+import android.util.TypedValue
 import android.text.format.DateFormat
 import android.text.format.Formatter
 import android.view.Gravity
@@ -29,6 +30,7 @@ import android.view.WindowInsets
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.HorizontalScrollView
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -197,12 +199,27 @@ class MainActivity : Activity() {
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
 
+        // Header row (same in all our apps, without config save/load): app name left, help right.
+        val head = LinearLayout(this)
+        head.gravity = Gravity.CENTER_VERTICAL
+        head.setPadding(dp(16), dp(4), dp(8), dp(4))
         val title = TextView(this)
         title.setText(R.string.app_name)
-        title.textSize = 20f
+        title.textSize = 24f
         title.typeface = Typeface.DEFAULT_BOLD
-        title.setPadding(dp(16), dp(12), dp(16), dp(12))
-        col.addView(title)
+        title.setTextColor(getColor(R.color.md_on_container))
+        head.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val help = ImageButton(this)
+        help.setImageResource(R.drawable.ic_help)
+        help.imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.md_primary))
+        val sel = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, sel, true)
+        help.setBackgroundResource(sel.resourceId)
+        help.contentDescription = getString(R.string.help)
+        help.tooltipText = getString(R.string.help)
+        help.setOnClickListener { Help.show(this) }
+        head.addView(help, LinearLayout.LayoutParams(dp(44), dp(44)))
+        col.addView(head)
 
         val tabRow = LinearLayout(this)
         tabRow.setPadding(dp(10), dp(4), dp(10), dp(8))

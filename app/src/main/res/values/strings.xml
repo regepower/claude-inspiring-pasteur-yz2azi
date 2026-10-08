@@ -21,4 +21,30 @@
     <string name="perm_text">DualFiles needs access to all files to show and change them.</string>
     <string name="perm_button">Grant access</string>
     <string name="no_app">No app can open this file</string>
+    <string name="help">Help</string>
+    <string name="help_ok">Got it</string>
+    <string name="donate">Donate</string>
+    <string name="donate_text">This app is smaller than a photo. Support its development on Liberapay.</string>
+    <string name="donate_url" translatable="false">https://liberapay.com/regepower/donate</string>
+    <string name="source_url" translatable="false">https://github.com/regepower/claude-inspiring-pasteur-yz2azi</string>
+    <string name="foss_text">This app is free and open-source software (FOSS) under the GPL-3.0 license.\nSource code: %1$s</string>
+    <string name="help_open" translatable="false">▾  %1$s</string>
+    <string name="help_closed" translatable="false">▸  %1$s</string>
+    <string name="help_expanded">expanded</string>
+    <string name="help_collapsed">collapsed</string>
+    <string name="help_footer" translatable="false">%1$s %2$s · %3$s\n%4$s\n\n%5$s</string>
+    <string-array name="help_titles">
+        <item>Four pages</item>
+        <item>Mark and open</item>
+        <item>Menu and actions</item>
+        <item>Folder tree</item>
+        <item>Access</item>
+    </string-array>
+    <string-array name="help_bodies">
+        <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
+        <item>Tap a row to mark it. Double tap opens a folder, or a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up.</item>
+        <item>Hold a row and release without moving: menu with copy, move, delete to the other side. Hold a row and drag sideways: scrolls a long name. Marked items also have buttons at the bottom.</item>
+        <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page.</item>
+        <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
+    </string-array>
 </resources>
