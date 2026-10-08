@@ -44,9 +44,28 @@
         <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
         <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. Mark with the check box on the left.</item>
         <item>Hold a row: menu with \"Open with\", copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
-        <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page.</item>
+        <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page. Sort and filter: the two chips above the list.</item>
         <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
     </string-array>
     <string name="open_with">Open with…</string>
     <string name="back_again">Nochmal zurück drücken zum Beenden</string>
+    <string name="sort_title">Sort by</string>
+    <string name="sort_name">Name</string>
+    <string name="sort_date">Date</string>
+    <string name="sort_size">Size</string>
+    <string name="sort_type">Type</string>
+    <string name="sort_asc">Ascending</string>
+    <string name="sort_desc">Descending</string>
+    <string name="filter_title">Show</string>
+    <string name="filter_all">All</string>
+    <string name="filter_folders">Folders</string>
+    <string name="filter_files">Files</string>
+    <string name="filter_images">Images</string>
+    <string name="filter_video">Videos</string>
+    <string name="filter_audio">Audio</string>
+    <string name="filter_docs">Documents</string>
+    <string name="filter_name">Name contains…</string>
+    <string name="filter_name_hint">Text in name</string>
+    <string name="chip_sort">Sort: %1$s %2$s</string>
+    <string name="chip_filter">Show: %1$s%2$s</string>
 </resources>

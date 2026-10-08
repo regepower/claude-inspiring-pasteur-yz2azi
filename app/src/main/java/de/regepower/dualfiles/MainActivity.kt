@@ -34,6 +34,7 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.BaseAdapter
 import android.widget.Button
+import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.ImageButton
 import android.widget.ImageView
@@ -55,6 +56,18 @@ private const val DST_COLOR = 0xFFB45309.toInt()
 private const val ERROR_COLOR = 0xFFB3261E.toInt()
 
 private fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
+
+private enum class SortBy(val label: Int) { NAME(R.string.sort_name), DATE(R.string.sort_date), SIZE(R.string.sort_size), TYPE(R.string.sort_type) }
+
+private enum class Filter(val label: Int, val exts: Set<String>? = null) {
+    ALL(R.string.filter_all),
+    FOLDERS(R.string.filter_folders),
+    FILES(R.string.filter_files),
+    IMAGES(R.string.filter_images, setOf("jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "svg")),
+    VIDEO(R.string.filter_video, setOf("mp4", "mkv", "avi", "mov", "webm", "3gp")),
+    AUDIO(R.string.filter_audio, setOf("mp3", "m4a", "ogg", "wav", "flac", "opus", "aac")),
+    DOCS(R.string.filter_docs, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "odt", "rtf", "csv")),
+}
 
 /** One row of the folder tree. */
 private class Node(val file: File, val depth: Int, val label: String)
@@ -85,6 +98,13 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     var treePage = 0
     var filePage = 0
     var gen = 0
+    var raw: List<Entry> = emptyList()   // as read from disk
+    var sortBy = SortBy.NAME
+    var sortDesc = false
+    var filter = Filter.ALL
+    var nameQuery = ""
+    lateinit var sortChip: TextView
+    lateinit var filterChip: TextView
 }
 
 /** A list row whose name part can be scrolled sideways while icon and check box stay put. */
@@ -459,6 +479,14 @@ class MainActivity : Activity() {
         page.orientation = LinearLayout.VERTICAL
         p.fileBand = band(p)
         page.addView(p.fileBand)
+        val chips = LinearLayout(this)
+        chips.setPadding(dp(6), dp(6), dp(6), dp(6))
+        p.sortChip = chip { showSortDialog(p) }
+        p.filterChip = chip { showFilterDialog(p) }
+        val lp = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.setMargins(dp(3), 0, dp(3), 0) } }
+        chips.addView(p.sortChip, lp())
+        chips.addView(p.filterChip, lp())
+        page.addView(chips)
         val list = PanList(this)
         styledList(list)
         p.fileList = list
@@ -573,6 +601,101 @@ class MainActivity : Activity() {
 
     private fun label(p: Pane) = getString(p.bandRes) + " · " + p.dir.path
 
+    private fun chip(onClick: () -> Unit) = TextView(this).apply {
+        textSize = 12f
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        gravity = Gravity.CENTER
+        setPadding(dp(8), dp(8), dp(8), dp(8))
+        setTextColor(getColor(R.color.md_on_container))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(8).toFloat()
+            setColor(getColor(R.color.md_container))
+        }
+        setOnClickListener { onClick() }
+    }
+
+    private fun updateChips(p: Pane) {
+        val arrow = if (p.sortDesc) "↓" else "↑"
+        p.sortChip.text = getString(R.string.chip_sort, getString(p.sortBy.label), arrow)
+        val name = if (p.nameQuery.isEmpty()) "" else " · \"${p.nameQuery}\""
+        p.filterChip.text = getString(R.string.chip_filter, getString(p.filter.label), name)
+    }
+
+    /** Sort and filter of the in-memory list: no disk access. Folders always come first. */
+    private fun viewOf(p: Pane): List<Entry> {
+        val cmp: Comparator<Entry> = when (p.sortBy) {
+            SortBy.NAME -> compareBy<Entry> { it.key }
+            SortBy.DATE -> compareBy<Entry> { it.modified }
+            SortBy.SIZE -> compareBy<Entry> { it.size }
+            SortBy.TYPE -> compareBy<Entry>({ it.file.extension.lowercase() }, { it.key })
+        }
+        val items = p.raw.filter { !it.up && matches(it, p) }
+            .sortedWith(compareBy<Entry> { !it.isDir }.then(if (p.sortDesc) cmp.reversed() else cmp))
+        return p.raw.filter { it.up } + items
+    }
+
+    private fun matches(e: Entry, p: Pane): Boolean {
+        if (p.nameQuery.isNotEmpty() && !e.key.contains(p.nameQuery.lowercase())) return false
+        return when (p.filter) {
+            Filter.ALL -> true
+            Filter.FOLDERS -> e.isDir
+            Filter.FILES -> !e.isDir
+            else -> !e.isDir && p.filter.exts?.contains(e.file.extension.lowercase()) == true
+        }
+    }
+
+    private fun applyView(p: Pane) {
+        p.entries = viewOf(p)
+        p.fileAdapter.notifyDataSetChanged()
+        updateChips(p)
+    }
+
+    private fun showSortDialog(p: Pane) {
+        val values = SortBy.values()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.sort_title)
+            .setSingleChoiceItems(values.map { getString(it.label) }.toTypedArray(), values.indexOf(p.sortBy)) { d, which ->
+                p.sortBy = values[which]
+                applyView(p)
+                d.dismiss()
+            }
+            .setNeutralButton(if (p.sortDesc) R.string.sort_asc else R.string.sort_desc) { _, _ ->
+                p.sortDesc = !p.sortDesc
+                applyView(p)
+            }
+            .show()
+    }
+
+    private fun showFilterDialog(p: Pane) {
+        val values = Filter.values()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.filter_title)
+            .setSingleChoiceItems(values.map { getString(it.label) }.toTypedArray(), values.indexOf(p.filter)) { d, which ->
+                p.filter = values[which]
+                applyView(p)
+                d.dismiss()
+            }
+            .setNeutralButton(R.string.filter_name) { _, _ -> showNameDialog(p) }
+            .show()
+    }
+
+    private fun showNameDialog(p: Pane) {
+        val input = EditText(this)
+        input.setText(p.nameQuery)
+        input.setHint(R.string.filter_name_hint)
+        input.setSingleLine()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.filter_name)
+            .setView(input)
+            .setPositiveButton(R.string.done) { _, _ ->
+                p.nameQuery = input.text.toString().trim()
+                applyView(p)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
     /** Re-reads one pane in the background; a newer load of the same pane wins. */
     private fun loadPane(p: Pane) {
         val gen = ++p.gen
@@ -587,7 +710,9 @@ class MainActivity : Activity() {
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
                 p.nodes = nodes
-                p.entries = entries
+                p.raw = entries
+                p.entries = viewOf(p)
+                updateChips(p)
                 p.treeAdapter.notifyDataSetChanged()
                 p.fileAdapter.notifyDataSetChanged()
             }

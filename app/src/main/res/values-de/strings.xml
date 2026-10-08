@@ -37,9 +37,28 @@
         <item>Nach links und rechts wischen (oder die Tabs antippen): Ordnerbaum der Quelle, Dateien der Quelle, Dateien des Ziels, Ordnerbaum des Ziels. Kopieren, Verschieben und Löschen gehen immer von der markierten Seite zur anderen Seite.</item>
         <item>Zeile antippen = öffnen: ein Ordner öffnet sich in der Liste, eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben. Markiert wird mit dem Häkchen links.</item>
         <item>Zeile halten: Menü mit \"Öffnen mit\", Kopieren, Verschieben, Löschen (zur anderen Seite). Bei markierten Einträgen gibt es unten auch Schaltflächen. Mit zwei Fingern seitlich ziehen: alle langen Namen scrollen, Symbole und Häkchen bleiben stehen. Ein Finger wischt weiter die Seiten.</item>
-        <item>Pfeil antippen klappt einen Ordner auf. Namen antippen wählt ihn aus: seine Dateien erscheinen auf der nächsten Seite.</item>
+        <item>Pfeil antippen klappt einen Ordner auf. Namen antippen wählt ihn aus: seine Dateien erscheinen auf der nächsten Seite. Sortieren und Filtern: die zwei Chips über der Liste.</item>
         <item>Die App braucht \"Zugriff auf alle Dateien\". Beim ersten Start öffnet sich die Systemeinstellung. Nichts verlässt dein Handy.</item>
     </string-array>
     <string name="open_with">Öffnen mit…</string>
     <string name="back_again">Nochmal zurück drücken zum Beenden</string>
+    <string name="sort_title">Sortieren nach</string>
+    <string name="sort_name">Name</string>
+    <string name="sort_date">Datum</string>
+    <string name="sort_size">Größe</string>
+    <string name="sort_type">Typ</string>
+    <string name="sort_asc">Aufsteigend</string>
+    <string name="sort_desc">Absteigend</string>
+    <string name="filter_title">Anzeigen</string>
+    <string name="filter_all">Alle</string>
+    <string name="filter_folders">Ordner</string>
+    <string name="filter_files">Dateien</string>
+    <string name="filter_images">Bilder</string>
+    <string name="filter_video">Videos</string>
+    <string name="filter_audio">Audio</string>
+    <string name="filter_docs">Dokumente</string>
+    <string name="filter_name">Name enthält…</string>
+    <string name="filter_name_hint">Text im Namen</string>
+    <string name="chip_sort">Sortieren: %1$s %2$s</string>
+    <string name="chip_filter">Filter: %1$s%2$s</string>
 </resources>
