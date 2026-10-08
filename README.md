@@ -13,3 +13,5 @@ Dual-pane file manager for Android, portrait only. Four pages, swipe left/right:
 
 Kotlin, no dependencies. Built by GitHub Actions (`Actions → run → Artifacts → DualFiles-release`).
 Needs "all files access" (granted on first start).
+
+Large folders: directories are read in a background thread, each file gets one attribute call, folder item counts are filled in afterwards (shows "…" until then).
