@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Base.AppTheme" parent="@android:style/Theme.DeviceDefault.DayNight">
+        <item name="android:windowBackground">@color/md_surface</item>
+        <item name="android:navigationBarColor">@color/md_surface</item>
+        <!-- No grey scrim behind the 3-button navigation bar. -->
+        <item name="android:enforceNavigationBarContrast">false</item>
+        <!-- No title/action bar: the app draws its own header row. -->
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <!-- Default text colours from Material You tokens (DeviceDefault text was a low-contrast grey). -->
+        <item name="android:textColor">@color/md_on_surface</item>
+        <item name="android:textColorPrimary">@color/md_on_surface</item>
+        <item name="android:textColorSecondary">@color/md_on_surface_variant</item>
+    </style>
+
+    <style name="AppTheme" parent="Base.AppTheme">
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

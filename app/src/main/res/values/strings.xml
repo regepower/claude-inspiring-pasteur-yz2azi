@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name" translatable="false">DualFiles</string>
+    <string name="tab_folders">Folders</string>
+    <string name="tab_source">Source</string>
+    <string name="tab_target">Target</string>
+    <string name="band_source">Source</string>
+    <string name="band_target">Target</string>
+    <string name="up" translatable="false">..</string>
+    <string name="items_count">%1$d items</string>
+    <string name="selected_count">%1$d selected</string>
+    <string name="copy">Copy</string>
+    <string name="move">Move</string>
+    <string name="delete">Delete</string>
+    <string name="copy_to_target">Copy to target</string>
+    <string name="move_to_target">Move to target</string>
+    <string name="delete_confirm">Delete %1$d items permanently?</string>
+    <string name="cancel">Cancel</string>
+    <string name="done">Done</string>
+    <string name="done_failed">%1$d failed</string>
+    <string name="perm_text">DualFiles needs access to all files to show and change them.</string>
+    <string name="perm_button">Grant access</string>
+</resources>

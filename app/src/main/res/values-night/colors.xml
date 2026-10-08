@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="md_primary">#A8C7FF</color>
+    <color name="md_on_primary">#05305F</color>
+    <color name="md_container">#214677</color>
+    <color name="md_on_container">#D6E3FF</color>
+    <color name="md_surface">#1A1C1E</color>
+    <color name="md_outline">#8F9099</color>
+    <color name="md_error_container">#93000A</color>
+    <color name="md_on_error_container">#FFDAD6</color>
+    <!-- Text on surface (primary) and secondary text: readable contrast. -->
+    <color name="md_on_surface">#E3E2E6</color>
+    <color name="md_on_surface_variant">#C4C6D0</color>
+</resources>

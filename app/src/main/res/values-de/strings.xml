@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="tab_folders">Ordner</string>
+    <string name="tab_source">Quelle</string>
+    <string name="tab_target">Ziel</string>
+    <string name="band_source">Quelle</string>
+    <string name="band_target">Ziel</string>
+    <string name="items_count">%1$d Elemente</string>
+    <string name="selected_count">%1$d markiert</string>
+    <string name="copy">Kopieren</string>
+    <string name="move">Verschieben</string>
+    <string name="delete">Löschen</string>
+    <string name="copy_to_target">Kopieren nach Ziel</string>
+    <string name="move_to_target">Verschieben nach Ziel</string>
+    <string name="delete_confirm">%1$d Elemente endgültig löschen?</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="done">Fertig</string>
+    <string name="done_failed">%1$d fehlgeschlagen</string>
+    <string name="perm_text">DualFiles braucht Zugriff auf alle Dateien, um sie anzuzeigen und zu ändern.</string>
+    <string name="perm_button">Zugriff erlauben</string>
+</resources>

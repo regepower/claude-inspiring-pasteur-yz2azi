@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="md_primary">@android:color/system_accent1_600</color>
+    <color name="md_on_primary">@android:color/system_accent1_0</color>
+    <color name="md_container">@android:color/system_accent1_100</color>
+    <color name="md_on_container">@android:color/system_accent1_900</color>
+    <color name="md_surface">@android:color/system_neutral1_10</color>
+    <color name="md_outline">@android:color/system_neutral2_500</color>
+    <!-- Text on surface (primary) and secondary text: readable contrast. -->
+    <color name="md_on_surface">@android:color/system_neutral1_900</color>
+    <color name="md_on_surface_variant">@android:color/system_neutral2_700</color>
+</resources>
