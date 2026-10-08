@@ -9,6 +9,7 @@ Dual-pane file manager for Android, portrait only. Four pages, swipe left/right:
 - Hold a row = menu: open with / copy / move / delete (to the other side).
 - Two fingers dragging sideways = scroll all long names; icons and check boxes stay. One finger swipes the pages.
 - Tap a folder in a tree = select it and jump to its file page.
+- Back = one folder up in the visible pane. At the top level, a second back press exits.
 
 Kotlin, no dependencies. Built by GitHub Actions (`Actions → run → Artifacts → DualFiles-release`).
 Needs "all files access" (granted on first start).

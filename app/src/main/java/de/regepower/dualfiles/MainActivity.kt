@@ -41,6 +41,7 @@ import android.widget.FrameLayout
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
+import android.window.OnBackInvokedDispatcher
 import java.io.File
 import java.util.Date
 
@@ -244,6 +245,7 @@ class MainActivity : Activity() {
     private var roots: List<File> = emptyList()
     private val rootNames = HashMap<String, String>()
     private val iconCache = HashMap<String, Drawable?>()
+    private var backAt = 0L
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -278,6 +280,29 @@ class MainActivity : Activity() {
         root.addView(mainView)
         root.addView(permView)
         setContentView(root)
+        // Android 13+ delivers back through the dispatcher (predictive back); older versions use onBackPressed().
+        if (Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
+        }
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() = handleBack()
+
+    /** Back: one folder up in the pane of the visible page; at the top level, a second press exits. */
+    private fun handleBack() {
+        if (mainView.visibility != View.VISIBLE) return finish()
+        val idx = Math.round(pager.scrollX / pager.pageWidth.toFloat()).coerceIn(0, 3)
+        val p = panes[if (idx < 2) 0 else 1]
+        val parent = p.dir.parentFile
+        if (roots.none { it.path == p.dir.path } && parent != null) {
+            open(p, parent)
+            return
+        }
+        val now = SystemClock.uptimeMillis()
+        if (now - backAt < 2000) return finish()
+        backAt = now
+        Toast.makeText(this, R.string.back_again, Toast.LENGTH_SHORT).show()
     }
 
     override fun onResume() {

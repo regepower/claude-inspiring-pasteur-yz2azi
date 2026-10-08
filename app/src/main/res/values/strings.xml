@@ -48,4 +48,5 @@
         <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
     </string-array>
     <string name="open_with">Open with…</string>
+    <string name="back_again">Nochmal zurück drücken zum Beenden</string>
 </resources>

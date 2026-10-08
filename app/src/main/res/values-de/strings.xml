@@ -41,4 +41,5 @@
         <item>Die App braucht \"Zugriff auf alle Dateien\". Beim ersten Start öffnet sich die Systemeinstellung. Nichts verlässt dein Handy.</item>
     </string-array>
     <string name="open_with">Öffnen mit…</string>
+    <string name="back_again">Nochmal zurück drücken zum Beenden</string>
 </resources>
