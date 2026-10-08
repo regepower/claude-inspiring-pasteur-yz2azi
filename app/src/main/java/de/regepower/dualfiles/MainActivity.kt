@@ -3,7 +3,9 @@ package de.regepower.dualfiles
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.PendingIntent
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.ResolveInfo
 import android.content.Intent
@@ -14,6 +16,7 @@ import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
+import android.os.Build
 import android.os.Environment
 import android.os.SystemClock
 import android.os.storage.StorageManager
@@ -282,6 +285,7 @@ class MainActivity : Activity() {
         val ok = Environment.isExternalStorageManager()
         mainView.visibility = if (ok) View.VISIBLE else View.GONE
         permView.visibility = if (ok) View.GONE else View.VISIBLE
+        iconCache.clear()
         if (ok) refreshAll()
     }
 
@@ -589,26 +593,29 @@ class MainActivity : Activity() {
             ai.name.contains("Resolver") || ai.name.contains("Chooser")
     }
 
-    /** Icon of the app that opens this file type (like Windows), or null. Cached per extension. */
+    /** The app Android opens this file with by default ("Immer"), or null if none is set. */
+    private fun defaultApp(f: File): ResolveInfo? =
+        packageManager.resolveActivity(viewIntent(f), 0)?.takeUnless { isChooser(it) }
+
+    /**
+     * Icon of the app the user chose for this file type: the one picked in "Öffnen mit…" (remembered),
+     * else the default app. No guessing: without either, the generic file icon stays.
+     */
     @Suppress("DEPRECATION")
     private fun appIcon(f: File): Drawable? {
         val ext = f.extension.lowercase()
         if (ext.isEmpty()) return null
         if (!iconCache.containsKey(ext)) {
-            var icon: Drawable? = null
-            val mime = FileOps.mime(f)
-            if (mime != null) {
-                val pm = packageManager
-                val probe = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://x/f.$ext"), mime)
-                // Only real apps with an icon of their own (the system chooser and icon-less
-                // components would show the grey default robot).
-                fun usable(ri: ResolveInfo) = !isChooser(ri) && ri.activityInfo.packageName != packageName &&
-                    ri.activityInfo.applicationInfo.icon != 0
-                val def = pm.resolveActivity(probe, 0)
-                val pick = if (def != null && usable(def)) def else pm.queryIntentActivities(probe, 0).firstOrNull { usable(it) }
-                icon = pick?.activityInfo?.applicationInfo?.loadIcon(pm)
+            val pm = packageManager
+            val remembered = getSharedPreferences(CHOICES_PREFS, MODE_PRIVATE).getString(ext, null)
+                ?.let { ComponentName.unflattenFromString(it) }
+            val info = try {
+                if (remembered != null) pm.getApplicationInfo(remembered.packageName, 0)
+                else defaultApp(f)?.activityInfo?.applicationInfo
+            } catch (e: PackageManager.NameNotFoundException) {
+                null
             }
-            iconCache[ext] = icon
+            iconCache[ext] = info?.takeIf { it.icon != 0 }?.loadIcon(pm)
         }
         val d = iconCache[ext] ?: return null
         return d.constantState?.newDrawable() ?: d
@@ -629,9 +636,19 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun openFile(f: File) = start(viewIntent(f))
+    /** Chooser for "Öffnen mit…": the pick is reported back to [ChooserReceiver] and remembered per extension. */
+    private fun chooser(f: File): Intent {
+        val ext = f.extension.lowercase()
+        val base = Intent(this, ChooserReceiver::class.java).setData(Uri.parse("dualfiles://choice/$ext"))
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+        val pi = PendingIntent.getBroadcast(this, ext.hashCode(), base, flags)
+        return Intent.createChooser(viewIntent(f), getString(R.string.open_with), pi.intentSender)
+    }
 
-    private fun openWith(f: File) = start(Intent.createChooser(viewIntent(f), getString(R.string.open_with)))
+    /** Tap: the default app opens directly; without a default, Android's chooser asks (and the pick is remembered). */
+    private fun openFile(f: File) = start(if (defaultApp(f) != null) viewIntent(f) else chooser(f))
+
+    private fun openWith(f: File) = start(chooser(f))
 
     // ---- Adapters ----
 
