@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.pm.ResolveInfo
 import android.content.Intent
 import android.graphics.Color
