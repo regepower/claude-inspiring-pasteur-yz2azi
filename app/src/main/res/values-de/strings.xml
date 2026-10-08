@@ -18,4 +18,5 @@
     <string name="done_failed">%1$d fehlgeschlagen</string>
     <string name="perm_text">DualFiles braucht Zugriff auf alle Dateien, um sie anzuzeigen und zu ändern.</string>
     <string name="perm_button">Zugriff erlauben</string>
+    <string name="no_app">Keine App kann diese Datei öffnen</string>
 </resources>

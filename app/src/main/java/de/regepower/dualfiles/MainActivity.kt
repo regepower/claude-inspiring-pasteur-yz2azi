@@ -1,27 +1,34 @@
 package de.regepower.dualfiles
 
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.os.storage.StorageManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.text.format.DateFormat
 import android.text.format.Formatter
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.BaseAdapter
 import android.widget.Button
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
@@ -78,9 +85,27 @@ private class TreeRow(ctx: Context) : LinearLayout(ctx) {
     }
 }
 
+/** Horizontal scroller that never reacts to touch; the hold-and-drag gesture of [HoldList] moves it. */
+private class NoTouchScroll(ctx: Context) : HorizontalScrollView(ctx) {
+    init {
+        isHorizontalScrollBarEnabled = false
+        isHorizontalFadingEdgeEnabled = true
+        setFadingEdgeLength(ctx.dp(24))
+        overScrollMode = OVER_SCROLL_NEVER
+        isFocusable = false
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = false
+
+    @SuppressLint("ClickableViewAccessibility")
+    override fun onTouchEvent(ev: MotionEvent): Boolean = false
+}
+
 private class FileRow(ctx: Context) : LinearLayout(ctx) {
     val box = TextView(ctx)
     val icon = ImageView(ctx)
+    val names = NoTouchScroll(ctx)
+    val inner = LinearLayout(ctx)
     val name = TextView(ctx)
     val meta = TextView(ctx)
 
@@ -94,17 +119,16 @@ private class FileRow(ctx: Context) : LinearLayout(ctx) {
         box.setTextColor(Color.WHITE)
         addView(box, LayoutParams(ctx.dp(22), ctx.dp(22)))
         addView(icon, LayoutParams(ctx.dp(44), ctx.dp(44)).also { it.leftMargin = ctx.dp(6) })
-        icon.setPadding(ctx.dp(10), ctx.dp(10), ctx.dp(10), ctx.dp(10))
-        val texts = LinearLayout(ctx)
-        texts.orientation = VERTICAL
+        icon.setPadding(ctx.dp(8), ctx.dp(8), ctx.dp(8), ctx.dp(8))
+        inner.orientation = VERTICAL
         name.textSize = 15f
         name.maxLines = 1
-        name.ellipsize = TextUtils.TruncateAt.END
         meta.textSize = 12f
         meta.maxLines = 1
-        texts.addView(name)
-        texts.addView(meta)
-        addView(texts, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        inner.addView(name)
+        inner.addView(meta)
+        names.addView(inner, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(names, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
     }
 }
 
@@ -120,6 +144,9 @@ class MainActivity : Activity() {
     private val tabs = ArrayList<TextView>()
     private var roots: List<File> = emptyList()
     private val rootNames = HashMap<String, String>()
+    private val iconCache = HashMap<String, Drawable?>()
+    private var lastTapFile: File? = null
+    private var lastTapTime = 0L
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -246,8 +273,7 @@ class MainActivity : Activity() {
         return t
     }
 
-    private fun styledList(): ListView {
-        val l = ListView(this)
+    private fun styledList(l: ListView = ListView(this)): ListView {
         l.divider = ColorDrawable(getColor(R.color.md_outline) and 0x55FFFFFF)
         l.dividerHeight = 1
         return l
@@ -274,20 +300,44 @@ class MainActivity : Activity() {
         page.orientation = LinearLayout.VERTICAL
         p.fileBand = band(p)
         page.addView(p.fileBand)
-        val list = styledList()
+        val list = HoldList(this)
+        styledList(list)
         p.fileAdapter = FileAdapter(p)
         list.adapter = p.fileAdapter
+        // Tap marks; a second tap on the same entry within the double-tap time undoes the mark and opens it.
         list.setOnItemClickListener { _, _, pos, _ ->
             val e = p.entries[pos]
-            if (e.up) open(p, e.file) else toggle(p, e.file)
+            if (e.up) {
+                open(p, e.file)
+            } else {
+                val now = SystemClock.uptimeMillis()
+                val double = e.file == lastTapFile && now - lastTapTime < ViewConfiguration.getDoubleTapTimeout()
+                toggle(p, e.file)
+                if (double) {
+                    lastTapFile = null
+                    if (e.file.isDirectory) open(p, e.file) else openFile(e.file)
+                } else {
+                    lastTapFile = e.file
+                    lastTapTime = now
+                }
+            }
         }
-        list.setOnItemLongClickListener { _, _, pos, _ ->
-            val e = p.entries[pos]
-            if (!e.up) {
+        // Hold + drag sideways scrolls the name; hold + release without moving opens the menu.
+        list.canHold = { it < p.entries.size && !p.entries[it].up }
+        list.onHoldMove = { pos, dx ->
+            val r = list.getChildAt(pos - list.firstVisiblePosition) as? FileRow
+            if (r != null) {
+                val max = (r.inner.width - r.names.width).coerceAtLeast(0)
+                r.names.scrollTo((-dx).toInt().coerceIn(0, max), 0)
+            }
+        }
+        list.onHoldEnd = { pos, moved ->
+            (list.getChildAt(pos - list.firstVisiblePosition) as? FileRow)?.names?.scrollTo(0, 0)
+            if (!moved && pos < p.entries.size) {
+                val e = p.entries[pos]
                 if (!p.selected.contains(e.file)) toggle(p, e.file)
                 showMenu()
             }
-            true
         }
         page.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         return page
@@ -428,6 +478,42 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /** Icon of the app that opens this file type (like Windows), or null. Cached per extension. */
+    @Suppress("DEPRECATION")
+    private fun appIcon(f: File): Drawable? {
+        val ext = f.extension.lowercase()
+        if (ext.isEmpty()) return null
+        if (!iconCache.containsKey(ext)) {
+            var icon: Drawable? = null
+            val mime = FileOps.mime(f)
+            if (mime != null) {
+                val pm = packageManager
+                val probe = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://x/f.$ext"), mime)
+                var ri = pm.resolveActivity(probe, 0)
+                // "android" = system chooser (no default app): take the first real handler instead.
+                if (ri == null || ri.activityInfo.packageName == "android") {
+                    ri = pm.queryIntentActivities(probe, 0).firstOrNull { it.activityInfo.packageName != packageName }
+                }
+                icon = ri?.loadIcon(pm)
+            }
+            iconCache[ext] = icon
+        }
+        val d = iconCache[ext] ?: return null
+        return d.constantState?.newDrawable() ?: d
+    }
+
+    private fun openFile(f: File) {
+        val uri = Uri.Builder().scheme("content").authority("$packageName.files").path(f.absolutePath).build()
+        val i = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, FileOps.mime(f) ?: "*/*")
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        try {
+            startActivity(i)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.no_app, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // ---- Adapters ----
 
     private inner class TreeAdapter(val p: Pane) : BaseAdapter() {
@@ -478,17 +564,17 @@ class MainActivity : Activity() {
             row.box.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
 
             val isDir = e.up || f.isDirectory
-            row.icon.setImageResource(if (isDir) R.drawable.ic_folder else R.drawable.ic_file)
-            row.icon.imageTintList = android.content.res.ColorStateList.valueOf(
-                if (isDir) p.color else getColor(R.color.md_on_surface_variant)
-            )
-            if (isDir && !e.up) {
-                // Tap on the folder icon opens it; tap elsewhere in the row marks it.
-                row.icon.setOnClickListener { open(p, f) }
+            val appDrawable = if (isDir) null else appIcon(f)
+            if (appDrawable != null) {
+                row.icon.setImageDrawable(appDrawable)
+                row.icon.imageTintList = null
             } else {
-                row.icon.setOnClickListener(null)
-                row.icon.isClickable = false
+                row.icon.setImageResource(if (isDir) R.drawable.ic_folder else R.drawable.ic_file)
+                row.icon.imageTintList = android.content.res.ColorStateList.valueOf(
+                    if (isDir) p.color else getColor(R.color.md_on_surface_variant)
+                )
             }
+            row.names.scrollTo(0, 0)
 
             row.name.text = if (e.up) getString(R.string.up) else f.name
             row.name.setTextColor(getColor(R.color.md_on_surface))

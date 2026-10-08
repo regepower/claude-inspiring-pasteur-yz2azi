@@ -1,9 +1,16 @@
 package de.regepower.dualfiles
 
+import android.webkit.MimeTypeMap
 import java.io.File
 
 /** Plain java.io file operations. Every function returns true on success. */
 object FileOps {
+
+    /** MIME type from the file extension, or null if unknown. */
+    fun mime(f: File): String? {
+        val ext = f.extension.lowercase()
+        return if (ext.isEmpty()) null else MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+    }
 
     /** `name`, or `name (1)`, `name (2)` … if it already exists in [dir]. */
     fun uniqueTarget(dir: File, name: String): File {
