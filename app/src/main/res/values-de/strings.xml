@@ -75,4 +75,6 @@
     <string name="cfg_loaded">Konfiguration geladen</string>
     <string name="cfg_error">Speichern nicht möglich</string>
     <string name="cfg_invalid">Keine DualFiles-Konfiguration</string>
+    <string name="share">Teilen</string>
+    <string name="print">Drucken</string>
 </resources>

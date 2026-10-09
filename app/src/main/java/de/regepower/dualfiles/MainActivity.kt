@@ -4,6 +4,7 @@ import android.app.Activity
 import org.json.JSONObject
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -523,7 +524,7 @@ class MainActivity : Activity() {
             val e = p.entries[pos]
             if (!e.up) {
                 if (!p.selected.contains(e.file)) toggle(p, e.file)
-                showMenu(e.file)
+                showMenu(e.file, e.isDir)
             }
             true
         }
@@ -844,12 +845,19 @@ class MainActivity : Activity() {
     // ---- Actions ----
 
     /** Menu for the held [file]: "Open with" (files only), then copy / move / delete for the marked items. */
-    private fun showMenu(file: File) {
+    private fun showMenu(file: File, isDir: Boolean) {
         val labels = ArrayList<String>()
         val actions = ArrayList<Int>()
-        if (file.isFile) {
+        val mime = FileOps.mime(file)
+        if (!isDir) {
             labels.add(getString(R.string.open_with))
             actions.add(3)
+            labels.add(getString(R.string.share))
+            actions.add(4)
+            if (FilePrint.canPrint(mime)) {
+                labels.add(getString(R.string.print))
+                actions.add(5)
+            }
         }
         labels.add(getString(R.string.copy_to_target))
         actions.add(0)
@@ -861,7 +869,12 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(getString(R.string.selected_count, n))
             .setItems(labels.toTypedArray()) { _, which ->
-                if (actions[which] == 3) openWith(file) else act(actions[which])
+                when (actions[which]) {
+                    3 -> openWith(file)
+                    4 -> shareSelected()
+                    5 -> FilePrint.print(this, uriFor(file), file.name, mime ?: "*/*")
+                    else -> act(actions[which])
+                }
             }
             .show()
     }
@@ -896,12 +909,32 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun viewIntent(f: File): Intent {
-        val uri = if (Saf.isSaf(f)) Saf.docUri(this, f) ?: Uri.EMPTY
+    /** Content uri another app can read: our own provider for local files, the provider's uri for Saf files. */
+    private fun uriFor(f: File): Uri =
+        if (Saf.isSaf(f)) Saf.docUri(this, f) ?: Uri.EMPTY
         else Uri.Builder().scheme("content").authority("$packageName.files").path(f.absolutePath).build()
-        return Intent(Intent.ACTION_VIEW)
-            .setDataAndType(uri, FileOps.mime(f) ?: "*/*")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+    private fun viewIntent(f: File): Intent = Intent(Intent.ACTION_VIEW)
+        .setDataAndType(uriFor(f), FileOps.mime(f) ?: "*/*")
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
+    /** Shares the marked files (folders are skipped) through Android's share sheet. */
+    private fun shareSelected() {
+        val p = panes.firstOrNull { it.selected.isNotEmpty() } ?: return
+        val files = p.entries.filter { !it.up && !it.isDir && p.selected.contains(it.file) }.map { it.file }
+        val uris = ArrayList(files.map { uriFor(it) }.filter { it != Uri.EMPTY })
+        if (uris.isEmpty()) return
+        val send = if (uris.size == 1) {
+            Intent(Intent.ACTION_SEND).putExtra(Intent.EXTRA_STREAM, uris[0]).setType(FileOps.mime(files[0]) ?: "*/*")
+        } else {
+            Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris).setType("*/*")
+        }
+        // ClipData carries the read grant for every uri to the receiving app
+        val clip = ClipData.newRawUri(null, uris[0])
+        for (u in uris.drop(1)) clip.addItem(ClipData.Item(u))
+        send.clipData = clip
+        send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        start(Intent.createChooser(send, getString(R.string.share)))
     }
 
     private fun start(i: Intent) {

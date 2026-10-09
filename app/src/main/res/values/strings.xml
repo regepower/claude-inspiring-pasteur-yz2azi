@@ -82,4 +82,6 @@
     <string name="cfg_loaded">Configuration loaded</string>
     <string name="cfg_error">Could not save</string>
     <string name="cfg_invalid">Not a DualFiles configuration</string>
+    <string name="share">Share</string>
+    <string name="print">Print</string>
 </resources>
