@@ -73,4 +73,13 @@
     <string name="assoc_none">No file type apps yet. Pick an app when opening a file, DualFiles remembers it.</string>
     <string name="assoc_change">Change</string>
     <string name="assoc_missing">App missing</string>
+    <string name="saf_add">Add folder (Google Drive, USB, …)</string>
+    <string name="saf_remove">Remove folder</string>
+    <string name="saf_none">No folders added yet.</string>
+    <string name="cfg_save">Save configuration</string>
+    <string name="cfg_load">Load configuration</string>
+    <string name="cfg_saved">Configuration saved</string>
+    <string name="cfg_loaded">Configuration loaded</string>
+    <string name="cfg_error">Could not save</string>
+    <string name="cfg_invalid">Not a DualFiles configuration</string>
 </resources>

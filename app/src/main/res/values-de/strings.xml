@@ -66,4 +66,13 @@
     <string name="assoc_none">Noch keine Zuordnung. Beim Öffnen einer Datei wählst du die App, dann merkt sich DualFiles sie.</string>
     <string name="assoc_change">Ändern</string>
     <string name="assoc_missing">App fehlt</string>
+    <string name="saf_add">Ordner hinzufügen (Google Drive, USB, …)</string>
+    <string name="saf_remove">Ordner entfernen</string>
+    <string name="saf_none">Noch keine Ordner hinzugefügt.</string>
+    <string name="cfg_save">Konfiguration speichern</string>
+    <string name="cfg_load">Konfiguration laden</string>
+    <string name="cfg_saved">Konfiguration gespeichert</string>
+    <string name="cfg_loaded">Konfiguration geladen</string>
+    <string name="cfg_error">Speichern nicht möglich</string>
+    <string name="cfg_invalid">Keine DualFiles-Konfiguration</string>
 </resources>

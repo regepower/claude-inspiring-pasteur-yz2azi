@@ -1,6 +1,7 @@
 package de.regepower.dualfiles
 
 import android.app.Activity
+import org.json.JSONObject
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
@@ -57,6 +58,9 @@ import java.util.concurrent.Executors
 private const val SRC_COLOR = 0xFF1F5FBF.toInt()
 private const val DST_COLOR = 0xFFB45309.toInt()
 private const val ERROR_COLOR = 0xFFB3261E.toInt()
+private const val REQ_TREE = 1
+private const val REQ_SAVE = 2
+private const val REQ_LOAD = 3
 
 private fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
@@ -270,6 +274,8 @@ class MainActivity : Activity() {
     private lateinit var barCount: TextView
     private val tabs = ArrayList<TextView>()
     private var roots: List<File> = emptyList()
+    private fun allRoots() = roots + Saf.rootFiles(this)
+    private fun rootName(r: File) = rootNames[r.path] ?: if (Saf.isSaf(r)) Saf.name(this, r) else r.name
     private val rootNames = HashMap<String, String>()
     private val loader = Executors.newSingleThreadExecutor()   // directory reads, off the UI thread
     private val counter = Executors.newSingleThreadExecutor()  // folder item counts
@@ -325,7 +331,7 @@ class MainActivity : Activity() {
         val idx = Math.round(pager.scrollX / pager.pageWidth.toFloat()).coerceIn(0, 3)
         val p = panes[if (idx < 2) 0 else 1]
         val parent = p.dir.parentFile
-        if (roots.none { it.path == p.dir.path } && parent != null) {
+        if (allRoots().none { it.path == p.dir.path } && parent != null) {
             open(p, parent)
             return
         }
@@ -693,13 +699,16 @@ class MainActivity : Activity() {
         fun add(f: File, depth: Int, label: String) {
             out.add(Node(f, depth, label, paint.measureText(label)))
             if (expanded.contains(f.path)) {
-                val subs = f.listFiles { x -> x.isDirectory }.orEmpty().sortedBy { it.name.lowercase() }
-                for (s in subs) add(s, depth + 1, s.name)
+                for (s in subDirs(f)) add(s, depth + 1, s.name)
             }
         }
-        for (r in roots) add(r, 0, rootNames[r.path] ?: r.name)
+        for (r in allRoots()) add(r, 0, rootName(r))
         return out
     }
+
+    private fun subDirs(f: File): List<File> =
+        if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
+        else f.listFiles { x -> x.isDirectory }.orEmpty().sortedBy { it.name.lowercase() }
 
     /** File list of [dir]: one attribute call per entry, sorted once (folders first). Runs on the loader thread. */
     private fun buildEntries(dir: File, showUp: Boolean): List<Entry> {
@@ -716,6 +725,14 @@ class MainActivity : Activity() {
                 e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
             }
             return e
+        }
+        if (Saf.isSaf(dir)) {
+            if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
+            val docs = Saf.list(this, dir).map { d ->
+                finish(Entry(File(dir, d.name), false, d.isDir, d.size, d.modified))
+            }
+            out.addAll(docs.sortedWith(compareBy({ !it.isDir }, { it.key })))
+            return out
         }
         if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
         val files = dir.listFiles().orEmpty().map { f ->
@@ -737,7 +754,7 @@ class MainActivity : Activity() {
     /** Breadcrumb of the pane's folder: every part is tappable. Too long paths lose the front part (ellipsis at the start). */
     private fun crumbs(p: Pane): CharSequence {
         val sb = SpannableStringBuilder(getString(p.bandRes))
-        val root = roots.firstOrNull { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") } ?: p.dir
+        val root = allRoots().firstOrNull { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") } ?: p.dir
         val parts = ArrayList<File>()
         parts.add(root)
         var cur = root
@@ -748,7 +765,7 @@ class MainActivity : Activity() {
         for ((i, dir) in parts.withIndex()) {
             sb.append(" › ")
             val start = sb.length
-            sb.append(if (i == 0) rootNames[root.path] ?: root.name else dir.name)
+            sb.append(if (i == 0) rootName(root) else dir.name)
             sb.setSpan(object : ClickableSpan() {
                 override fun onClick(widget: View) = open(p, dir)
                 override fun updateDrawState(ds: TextPaint) {
@@ -768,7 +785,7 @@ class MainActivity : Activity() {
         p.fileBand.text = crumbs(p)
         loader.execute {
             val nodes = buildNodes(expanded)
-            val showUp = roots.none { it.path == dir.path } && dir.parentFile?.canRead() == true
+            val showUp = allRoots().none { it.path == dir.path } && dir.parentFile?.canRead() == true
             val entries = buildEntries(dir, showUp)
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
@@ -812,7 +829,7 @@ class MainActivity : Activity() {
         counts[path]?.let { return it }
         if (countsPending.add(path)) {
             counter.execute {
-                val n = File(path).list()?.size ?: 0
+                val n = if (Saf.isSaf(File(path))) Saf.list(this, File(path)).size else File(path).list()?.size ?: 0
                 runOnUiThread {
                     countsPending.remove(path)
                     if (!isFinishing) {
@@ -881,7 +898,8 @@ class MainActivity : Activity() {
     }
 
     private fun viewIntent(f: File): Intent {
-        val uri = Uri.Builder().scheme("content").authority("$packageName.files").path(f.absolutePath).build()
+        val uri = if (Saf.isSaf(f)) Saf.docUri(this, f) ?: Uri.EMPTY
+        else Uri.Builder().scheme("content").authority("$packageName.files").path(f.absolutePath).build()
         return Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, FileOps.mime(f) ?: "*/*")
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -934,11 +952,99 @@ class MainActivity : Activity() {
     // ---- Settings ----
 
     private fun showSettings() {
+        val items = arrayOf(
+            getString(R.string.assoc_title),
+            getString(R.string.saf_add),
+            getString(R.string.saf_remove),
+            getString(R.string.cfg_save),
+            getString(R.string.cfg_load),
+        )
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
-            .setItems(arrayOf(getString(R.string.assoc_title))) { _, _ -> showAssociations() }
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showAssociations()
+                    1 -> startActivityForResult(
+                        Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                        ),
+                        REQ_TREE
+                    )
+                    2 -> showRemoveSaf()
+                    3 -> startActivityForResult(
+                        Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
+                            .setType("application/json").putExtra(Intent.EXTRA_TITLE, "DualFiles.json"),
+                        REQ_SAVE
+                    )
+                    4 -> startActivityForResult(
+                        Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json"),
+                        REQ_LOAD
+                    )
+                }
+            }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    private fun showRemoveSaf() {
+        val folders = Saf.rootFiles(this)
+        if (folders.isEmpty()) {
+            AlertDialog.Builder(this).setMessage(R.string.saf_none).setPositiveButton(R.string.help_ok, null).show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.saf_remove)
+            .setItems(folders.map { rootName(it) }.toTypedArray()) { _, which ->
+                Saf.remove(this, folders[which])
+                refreshAll()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (resultCode != RESULT_OK) return
+        when (requestCode) {
+            REQ_TREE -> {
+                Saf.add(this, uri)
+                refreshAll()
+            }
+            REQ_SAVE -> try {
+                contentResolver.openOutputStream(uri, "wt")?.use { it.write(configJson().toByteArray()) }
+                Toast.makeText(this, R.string.cfg_saved, Toast.LENGTH_SHORT).show()
+            } catch (e: IOException) {
+                Toast.makeText(this, R.string.cfg_error, Toast.LENGTH_SHORT).show()
+            }
+            REQ_LOAD -> try {
+                val text = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() } ?: throw IOException()
+                applyConfig(text)
+                Toast.makeText(this, R.string.cfg_loaded, Toast.LENGTH_SHORT).show()
+                refreshAll()
+            } catch (e: Exception) {
+                Toast.makeText(this, R.string.cfg_invalid, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /** The app choices as JSON (format 1). Chosen folders are not exported: their access belongs to this phone. */
+    private fun configJson(): String {
+        val assoc = JSONObject()
+        for ((k, v) in choices.all) assoc.put(k, v as String)
+        return JSONObject().put("app", packageName).put("format", 1).put("assoc", assoc).toString(2)
+    }
+
+    /** Replaces the app choices with the ones in [text]. Throws if it is not one of our files. */
+    private fun applyConfig(text: String) {
+        val o = JSONObject(text)
+        require(o.optString("app") == packageName && o.optInt("format") == 1) { "not a DualFiles config" }
+        val assoc = o.getJSONObject("assoc")
+        val edit = choices.edit().clear()
+        for (k in assoc.keys()) edit.putString(k, assoc.getString(k))
+        edit.commit()
     }
 
     private fun appLabel(flat: String?): String {
