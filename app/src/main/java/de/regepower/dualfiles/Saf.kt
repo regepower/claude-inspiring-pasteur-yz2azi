@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.webkit.MimeTypeMap
 import java.io.File
 
 /**
@@ -100,5 +101,27 @@ internal object Saf {
     fun docUri(ctx: Context, f: File): Uri? {
         val (tree, docId) = resolve(ctx, f) ?: return null
         return DocumentsContract.buildDocumentUriUsingTree(tree, docId)
+    }
+
+    /** Metadata of [f], or null if it does not exist. */
+    fun stat(ctx: Context, f: File): Doc? {
+        val (tree, docId) = resolve(ctx, f) ?: return null
+        return info(ctx, tree, docId)
+    }
+
+    /** Creates a file or folder [name] in the virtual folder [dir]; returns its path (the provider may rename it). */
+    fun createChild(ctx: Context, dir: File, name: String, isDir: Boolean): File? {
+        val (tree, parentId) = resolve(ctx, dir) ?: return null
+        val parentUri = DocumentsContract.buildDocumentUriUsingTree(tree, parentId)
+        val mime = if (isDir) DocumentsContract.Document.MIME_TYPE_DIR
+            else MimeTypeMap.getSingleton().getMimeTypeFromExtension(File(name).extension.lowercase()) ?: "application/octet-stream"
+        val created = DocumentsContract.createDocument(ctx.contentResolver, parentUri, mime, name) ?: return null
+        val actual = info(ctx, tree, DocumentsContract.getDocumentId(created))?.name ?: name
+        return File(dir, actual)
+    }
+
+    fun delete(ctx: Context, f: File): Boolean {
+        val (tree, docId) = resolve(ctx, f) ?: return false
+        return DocumentsContract.deleteDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, docId))
     }
 }

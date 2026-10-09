@@ -873,11 +873,11 @@ class MainActivity : Activity() {
         val dstDir = (if (src === panes[0]) panes[1] else panes[0]).dir
         val items = src.selected.toList()
         when (which) {
-            0 -> execute(items) { FileOps.copy(it, dstDir) }
-            1 -> execute(items) { FileOps.move(it, dstDir) }
+            0 -> execute(items) { Transfer.copy(this, it, dstDir) }
+            1 -> execute(items) { Transfer.move(this, it, dstDir) }
             else -> AlertDialog.Builder(this)
                 .setMessage(getString(R.string.delete_confirm, items.size))
-                .setPositiveButton(R.string.delete) { _, _ -> execute(items) { FileOps.delete(it) } }
+                .setPositiveButton(R.string.delete) { _, _ -> execute(items) { Transfer.delete(this, it) } }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
         }
