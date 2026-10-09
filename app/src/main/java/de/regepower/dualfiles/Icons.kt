@@ -165,7 +165,7 @@ internal object IconText {
 /**
  * Generated icon in the app's own style, drawn in a 48 x 56 unit box:
  * a file with folded corner and the extension inside, or a filled folder.
- * [selected] adds a check badge at the bottom right.
+ * [selected] adds a check badge at the bottom right. A [thumb] (preview picture) replaces the file shape.
  */
 internal class EntryIcon(
     private val label: String,
@@ -176,6 +176,7 @@ internal class EntryIcon(
     private val badge: Int,
     private val appBadge: Bitmap? = null,
     private val appTint: Int = 0,
+    private val thumb: Bitmap? = null,
 ) : Drawable() {
 
     override fun draw(canvas: Canvas) {
@@ -184,9 +185,24 @@ internal class EntryIcon(
         canvas.translate(b.left.toFloat(), b.top.toFloat())
         canvas.scale(b.width() / 48f, b.height() / 56f)
 
-        fillPaint.color = fill
-        canvas.drawPath(if (isFolder) FOLDER else FILE, fillPaint)
-        if (!isFolder) {
+        if (thumb != null) {
+            // Centre crop into the icon box with rounded corners
+            val scale = max(48f / thumb.width, 56f / thumb.height)
+            val w = 48f / scale
+            val h = 56f / scale
+            val src = android.graphics.Rect(
+                ((thumb.width - w) / 2).toInt(), ((thumb.height - h) / 2).toInt(),
+                ((thumb.width + w) / 2).toInt(), ((thumb.height + h) / 2).toInt()
+            )
+            canvas.save()
+            canvas.clipPath(THUMB)
+            canvas.drawBitmap(thumb, src, RectF(0f, 0f, 48f, 56f), badgePaint.apply { colorFilter = null })
+            canvas.restore()
+        } else {
+            fillPaint.color = fill
+            canvas.drawPath(if (isFolder) FOLDER else FILE, fillPaint)
+        }
+        if (!isFolder && thumb == null) {
             fillPaint.color = 0x38000000
             canvas.drawPath(FOLD, fillPaint)
             if (appBadge != null) {
@@ -225,6 +241,7 @@ internal class EntryIcon(
         val FILE = Path().apply {
             moveTo(0f, 0f); lineTo(32f, 0f); lineTo(48f, 16f); lineTo(48f, 56f); lineTo(0f, 56f); close()
         }
+        val THUMB = Path().apply { addRoundRect(RectF(0f, 0f, 48f, 56f), 6f, 6f, Path.Direction.CW) }
         val FOLD = Path().apply {
             moveTo(32f, 0f); lineTo(32f, 16f); lineTo(48f, 16f); close()
         }

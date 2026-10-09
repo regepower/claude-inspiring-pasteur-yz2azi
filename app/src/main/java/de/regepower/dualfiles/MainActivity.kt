@@ -305,6 +305,7 @@ class MainActivity : Activity() {
     private var backAt = 0L
     private val settings by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
     @Volatile private var showHidden = false                   // read on the loader thread
+    private var showThumbs = true
     private fun favorites(): Set<String> = settings.getStringSet("favs", null).orEmpty()
 
     @Suppress("DEPRECATION")
@@ -328,6 +329,7 @@ class MainActivity : Activity() {
         )
         for (p in panes) expandTo(p, p.dir)
         showHidden = settings.getBoolean("hidden", false)
+        showThumbs = settings.getBoolean("thumbs", true)
 
         val root = FrameLayout(this)
         root.setBackgroundColor(getColor(R.color.md_surface))
@@ -1074,6 +1076,7 @@ class MainActivity : Activity() {
             getString(R.string.cfg_save),
             getString(R.string.cfg_load),
             getString(if (showHidden) R.string.hidden_hide else R.string.hidden_show),
+            getString(if (showThumbs) R.string.thumbs_off else R.string.thumbs_on),
         )
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
@@ -1102,6 +1105,12 @@ class MainActivity : Activity() {
                         settings.edit().putBoolean("hidden", showHidden).apply()
                         counts.clear()
                         refreshAll()
+                    }
+                    6 -> {
+                        showThumbs = !showThumbs
+                        settings.edit().putBoolean("thumbs", showThumbs).apply()
+                        if (!showThumbs) Thumbs.clear()
+                        for (p in panes) p.fileAdapter.notifyDataSetChanged()
                     }
                 }
             }
@@ -1152,12 +1161,12 @@ class MainActivity : Activity() {
         }
     }
 
-    /** App choices, favourites and the hidden-files setting as JSON (format 1). Chosen folders are not exported: their access belongs to this phone. */
+    /** App choices, favourites and the hidden-files and preview settings as JSON (format 1). Chosen folders are not exported: their access belongs to this phone. */
     private fun configJson(): String {
         val assoc = JSONObject()
         for ((k, v) in choices.all) assoc.put(k, v as String)
         return JSONObject().put("app", packageName).put("format", 1).put("assoc", assoc)
-            .put("favs", org.json.JSONArray(favorites().sorted())).put("hidden", showHidden).toString(2)
+            .put("favs", org.json.JSONArray(favorites().sorted())).put("hidden", showHidden).put("thumbs", showThumbs).toString(2)
     }
 
     /** Replaces the app choices with the ones in [text]. Throws if it is not one of our files. */
@@ -1174,6 +1183,10 @@ class MainActivity : Activity() {
         if (o.has("hidden")) {
             showHidden = o.getBoolean("hidden")
             settings.edit().putBoolean("hidden", showHidden).apply()
+        }
+        if (o.has("thumbs")) {
+            showThumbs = o.getBoolean("thumbs")
+            settings.edit().putBoolean("thumbs", showThumbs).apply()
         }
     }
 
@@ -1272,7 +1285,11 @@ class MainActivity : Activity() {
             val ext = if (isDir) "" else f.extension.lowercase().take(4)
             val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
             val appBitmap = if (isDir) null else assocCached(f.extension.lowercase())?.let { AppBadges.get(this@MainActivity, it.packageName) }
-            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, text))
+            // Preview of images and videos (setting), made in the background; the rows redraw when it is ready
+            val thumb = if (!isDir && showThumbs && Thumbs.canPreview(f)) {
+                Thumbs.get(this@MainActivity, f, e.modified) { for (q in panes) q.fileAdapter.notifyDataSetChanged() }
+            } else null
+            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, text, thumb))
             row.iconHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
             row.iconHit.setOnClickListener { toggle(p, f) }
 

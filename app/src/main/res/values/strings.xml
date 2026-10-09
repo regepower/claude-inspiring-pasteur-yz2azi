@@ -93,4 +93,6 @@
     <string name="folder_menu">Folder</string>
     <string name="hidden_show">Show hidden files</string>
     <string name="hidden_hide">Hide hidden files</string>
+    <string name="thumbs_on">Show previews of pictures and videos</string>
+    <string name="thumbs_off">Hide previews of pictures and videos</string>
 </resources>

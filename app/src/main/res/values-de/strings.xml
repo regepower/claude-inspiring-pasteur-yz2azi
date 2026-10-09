@@ -86,4 +86,6 @@
     <string name="folder_menu">Ordner</string>
     <string name="hidden_show">Versteckte Dateien zeigen</string>
     <string name="hidden_hide">Versteckte Dateien ausblenden</string>
+    <string name="thumbs_on">Vorschaubilder von Bildern und Videos zeigen</string>
+    <string name="thumbs_off">Vorschaubilder ausblenden</string>
 </resources>
