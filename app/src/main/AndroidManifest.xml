@@ -30,6 +30,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <!-- Receives the app picked in the chooser so it is remembered per file type. -->
+        <receiver
+            android:name=".ChooserReceiver"
+            android:exported="false" />
         <provider
             android:name=".FileShare"
             android:authorities="${applicationId}.files"

@@ -3,15 +3,17 @@ package de.regepower.dualfiles
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ResolveInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.app.PendingIntent
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
@@ -21,7 +23,13 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.text.format.DateFormat
 import android.text.format.Formatter
+import android.text.Spanned
+import android.text.SpannableStringBuilder
+import android.text.TextPaint
+import android.text.method.LinkMovementMethod
+import android.text.style.ClickableSpan
 import android.util.TypedValue
+import android.webkit.MimeTypeMap
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -360,6 +368,14 @@ class MainActivity : Activity() {
         help.contentDescription = getString(R.string.help)
         help.tooltipText = getString(R.string.help)
         help.setOnClickListener { Help.show(this) }
+        val gear = TextView(this)
+        gear.text = "⚙"
+        gear.textSize = 22f
+        gear.gravity = Gravity.CENTER
+        gear.setTextColor(getColor(R.color.md_on_container))
+        gear.contentDescription = getString(R.string.settings_title)
+        gear.setOnClickListener { showSettings() }
+        head.addView(gear, LinearLayout.LayoutParams(dp(44), dp(44)))
         head.addView(help, LinearLayout.LayoutParams(dp(44), dp(44)))
         col.addView(head)
 
@@ -427,7 +443,8 @@ class MainActivity : Activity() {
         t.textSize = 12f
         t.typeface = Typeface.DEFAULT_BOLD
         t.maxLines = 1
-        t.ellipsize = TextUtils.TruncateAt.MIDDLE
+        t.ellipsize = TextUtils.TruncateAt.START
+        t.movementMethod = LinkMovementMethod.getInstance()
         t.setPadding(dp(12), dp(8), dp(12), dp(8))
         return t
     }
@@ -717,15 +734,38 @@ class MainActivity : Activity() {
         textSize = sp * resources.displayMetrics.scaledDensity
     }
 
-    private fun label(p: Pane) = getString(p.bandRes) + " · " + p.dir.path
+    /** Breadcrumb of the pane's folder: every part is tappable. Too long paths lose the front part (ellipsis at the start). */
+    private fun crumbs(p: Pane): CharSequence {
+        val sb = SpannableStringBuilder(getString(p.bandRes))
+        val root = roots.firstOrNull { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") } ?: p.dir
+        val parts = ArrayList<File>()
+        parts.add(root)
+        var cur = root
+        for (name in p.dir.path.removePrefix(root.path).split('/').filter { it.isNotEmpty() }) {
+            cur = File(cur, name)
+            parts.add(cur)
+        }
+        for ((i, dir) in parts.withIndex()) {
+            sb.append(" › ")
+            val start = sb.length
+            sb.append(if (i == 0) rootNames[root.path] ?: root.name else dir.name)
+            sb.setSpan(object : ClickableSpan() {
+                override fun onClick(widget: View) = open(p, dir)
+                override fun updateDrawState(ds: TextPaint) {
+                    ds.isUnderlineText = false
+                }
+            }, start, sb.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return sb
+    }
 
     /** Re-reads one pane in the background; a newer load of the same pane wins. */
     private fun loadPane(p: Pane) {
         val gen = ++p.gen
         val dir = p.dir
         val expanded = HashSet(p.expanded)
-        p.treeBand.text = label(p)
-        p.fileBand.text = label(p)
+        p.treeBand.text = crumbs(p)
+        p.fileBand.text = crumbs(p)
         loader.execute {
             val nodes = buildNodes(expanded)
             val showUp = roots.none { it.path == dir.path } && dir.parentFile?.canRead() == true
@@ -840,16 +880,6 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    private fun isChooser(ri: ResolveInfo): Boolean {
-        val ai = ri.activityInfo
-        return ai.packageName == "android" || ai.packageName == "com.android.intentresolver" ||
-            ai.name.contains("Resolver") || ai.name.contains("Chooser")
-    }
-
-    /** The app Android opens this file with by default ("Immer"), or null if none is set. */
-    private fun defaultApp(f: File): ResolveInfo? =
-        packageManager.resolveActivity(viewIntent(f), 0)?.takeUnless { isChooser(it) }
-
     private fun viewIntent(f: File): Intent {
         val uri = Uri.Builder().scheme("content").authority("$packageName.files").path(f.absolutePath).build()
         return Intent(Intent.ACTION_VIEW)
@@ -865,13 +895,94 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Android's app chooser for "Öffnen mit…". */
-    private fun chooser(f: File): Intent = Intent.createChooser(viewIntent(f), getString(R.string.open_with))
+    private val choices by lazy { getSharedPreferences(CHOICES_PREFS, MODE_PRIVATE) }
 
-    /** Tap: the default app opens directly; without a default, Android's chooser asks. */
-    private fun openFile(f: File) = start(if (defaultApp(f) != null) viewIntent(f) else chooser(f))
+    /** The app remembered for this extension, if it is still installed. */
+    private fun assocFor(ext: String): ComponentName? {
+        val cn = choices.getString(ext, null)?.let { ComponentName.unflattenFromString(it) } ?: return null
+        return try {
+            packageManager.getActivityInfo(cn, 0)
+            cn
+        } catch (e: PackageManager.NameNotFoundException) {
+            null
+        }
+    }
 
-    private fun openWith(f: File) = start(chooser(f))
+    /** Android's chooser; the app picked there is remembered for this extension. */
+    private fun chooserFor(ext: String, target: Intent): Intent {
+        val base = Intent(this, ChooserReceiver::class.java).setData(Uri.parse("dualfiles://choice/$ext"))
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+        val pi = PendingIntent.getBroadcast(this, ext.hashCode(), base, flags)
+        return Intent.createChooser(target, getString(R.string.open_with), pi.intentSender)
+    }
+
+    /** Intent for an extension without a file, used to pick an app for it. */
+    private fun sampleIntent(ext: String): Intent {
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+        return Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse("content://$packageName.files/sample.$ext"), mime)
+    }
+
+    /** Tap: the app remembered for this type opens the file; otherwise the chooser asks and remembers the pick. */
+    private fun openFile(f: File) {
+        val ext = f.extension.lowercase()
+        val cn = assocFor(ext)
+        start(if (cn != null) viewIntent(f).setComponent(cn) else chooserFor(ext, viewIntent(f)))
+    }
+
+    private fun openWith(f: File) = start(chooserFor(f.extension.lowercase(), viewIntent(f)))
+
+    // ---- Settings ----
+
+    private fun showSettings() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.settings_title)
+            .setItems(arrayOf(getString(R.string.assoc_title))) { _, _ -> showAssociations() }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun appLabel(flat: String?): String {
+        val cn = flat?.let { ComponentName.unflattenFromString(it) } ?: return "?"
+        return try {
+            packageManager.getActivityInfo(cn, 0).loadLabel(packageManager).toString()
+        } catch (e: PackageManager.NameNotFoundException) {
+            getString(R.string.assoc_missing)
+        }
+    }
+
+    private fun showAssociations() {
+        val exts = choices.all.keys.sorted()
+        if (exts.isEmpty()) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.assoc_title)
+                .setMessage(R.string.assoc_none)
+                .setPositiveButton(R.string.help_ok, null)
+                .show()
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle(R.string.assoc_title)
+            .setItems(exts.map { ".$it  →  ${appLabel(choices.getString(it, null))}" }.toTypedArray()) { _, which ->
+                showAssociationActions(exts[which])
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    private fun showAssociationActions(ext: String) {
+        AlertDialog.Builder(this)
+            .setTitle(".$ext")
+            .setItems(arrayOf(getString(R.string.assoc_change), getString(R.string.delete))) { _, which ->
+                if (which == 0) {
+                    start(chooserFor(ext, sampleIntent(ext)))
+                } else {
+                    choices.edit().remove(ext).apply()
+                    showAssociations()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
 
     // ---- Adapters ----
 

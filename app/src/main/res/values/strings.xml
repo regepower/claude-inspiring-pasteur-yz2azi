@@ -68,4 +68,9 @@
     <string name="filter_name_hint">Text in name</string>
     <string name="chip_sort">Sort: %1$s %2$s</string>
     <string name="chip_filter">Show: %1$s%2$s</string>
+    <string name="settings_title">Settings</string>
+    <string name="assoc_title">File type apps</string>
+    <string name="assoc_none">No file type apps yet. Pick an app when opening a file, DualFiles remembers it.</string>
+    <string name="assoc_change">Change</string>
+    <string name="assoc_missing">App missing</string>
 </resources>
