@@ -42,7 +42,7 @@
     </string-array>
     <string-array name="help_bodies">
         <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
-        <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. Mark with the check box on the left.</item>
+        <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. Mark: tap the icon on the left, a check appears on it.</item>
         <item>Hold a row: menu with \"Open with\", copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
         <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page. Sort and filter: the two chips above the list.</item>
         <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>

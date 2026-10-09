@@ -35,7 +35,7 @@
     </string-array>
     <string-array name="help_bodies">
         <item>Nach links und rechts wischen (oder die Tabs antippen): Ordnerbaum der Quelle, Dateien der Quelle, Dateien des Ziels, Ordnerbaum des Ziels. Kopieren, Verschieben und Löschen gehen immer von der markierten Seite zur anderen Seite.</item>
-        <item>Zeile antippen = öffnen: ein Ordner öffnet sich in der Liste, eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben. Markiert wird mit dem Häkchen links.</item>
+        <item>Zeile antippen = öffnen: ein Ordner öffnet sich in der Liste, eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben. Markiert wird durch Antippen des Symbols links, dann erscheint ein Haken darauf.</item>
         <item>Zeile halten: Menü mit \"Öffnen mit\", Kopieren, Verschieben, Löschen (zur anderen Seite). Bei markierten Einträgen gibt es unten auch Schaltflächen. Mit zwei Fingern seitlich ziehen: alle langen Namen scrollen, Symbole und Häkchen bleiben stehen. Ein Finger wischt weiter die Seiten.</item>
         <item>Pfeil antippen klappt einen Ordner auf. Namen antippen wählt ihn aus: seine Dateien erscheinen auf der nächsten Seite. Sortieren und Filtern: die zwei Chips über der Liste.</item>
         <item>Die App braucht \"Zugriff auf alle Dateien\". Beim ersten Start öffnet sich die Systemeinstellung. Nichts verlässt dein Handy.</item>

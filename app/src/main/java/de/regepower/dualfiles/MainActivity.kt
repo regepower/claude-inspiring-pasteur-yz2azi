@@ -1,46 +1,41 @@
 package de.regepower.dualfiles
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
-import android.app.PendingIntent
 import android.content.ActivityNotFoundException
-import android.content.ComponentName
 import android.content.Context
-import android.content.pm.PackageManager
-import android.content.pm.ResolveInfo
 import android.content.Intent
+import android.content.pm.ResolveInfo
 import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.drawable.ColorDrawable
-import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
-import android.os.Bundle
 import android.os.Build
+import android.os.Bundle
 import android.os.Environment
 import android.os.SystemClock
 import android.os.storage.StorageManager
 import android.provider.Settings
 import android.text.TextUtils
-import android.util.TypedValue
 import android.text.format.DateFormat
 import android.text.format.Formatter
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
-import android.widget.HorizontalScrollView
+import android.widget.FrameLayout
 import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
-import android.widget.FrameLayout
 import android.widget.ListView
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
@@ -48,8 +43,8 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.attribute.BasicFileAttributes
-import java.util.concurrent.Executors
 import java.util.Date
+import java.util.concurrent.Executors
 
 private const val SRC_COLOR = 0xFF1F5FBF.toInt()
 private const val DST_COLOR = 0xFFB45309.toInt()
@@ -69,8 +64,8 @@ private enum class Filter(val label: Int, val exts: Set<String>? = null) {
     DOCS(R.string.filter_docs, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "odt", "rtf", "csv")),
 }
 
-/** One row of the folder tree. */
-private class Node(val file: File, val depth: Int, val label: String)
+/** One row of the folder tree; [width] is the name's width in px. */
+private class Node(val file: File, val depth: Int, val label: String, val width: Float)
 
 /** One row of the file list; [up] marks the ".." row, whose [file] is the parent folder. */
 private class Entry(
@@ -81,6 +76,8 @@ private class Entry(
     val modified: Long = 0,
 ) {
     val key = file.name.lowercase()
+    var meta = ""       // size · date (files); folders get their item count in the row
+    var width = 0f      // widest text of the row in px, for the horizontal range
 }
 
 /** One side (source or target): current folder, selection, tree state. */
@@ -107,46 +104,20 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     lateinit var filterChip: TextView
 }
 
-/** A list row whose name part can be scrolled sideways while icon and check box stay put. */
+/** A list row whose name can be moved sideways; [clip] is the visible part of the name. */
 private interface NameRow {
-    val scroller: NoTouchScroll
+    val clip: View
     val content: View
 }
 
-/** Horizontal scroller that never reacts to touch; the two-finger gesture of [PanList] moves it. */
-private class NoTouchScroll(ctx: Context) : HorizontalScrollView(ctx) {
-    var targetX = 0
-
-    init {
-        isHorizontalScrollBarEnabled = false
-        isHorizontalFadingEdgeEnabled = true
-        setFadingEdgeLength(ctx.dp(24))
-        overScrollMode = OVER_SCROLL_NEVER
-        isFocusable = false
-    }
-
-    fun setOffset(x: Int) {
-        targetX = x
-        scrollTo(x, 0)
-    }
-
-    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
-        super.onLayout(changed, l, t, r, b)
-        if (scrollX != targetX) scrollTo(targetX, 0) // clamps to the content width
-    }
-
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean = false
-
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(ev: MotionEvent): Boolean = false
-}
-
 /**
- * ListView where a two-finger sideways drag scrolls all names at once ([nameOffset]);
- * one finger keeps scrolling the list and swiping the pages.
+ * ListView with one shared sideways offset for all names. A two-finger drag moves it; one finger
+ * keeps scrolling the list and swiping the pages. [onRange] tells the scroll bar about the range.
  */
 private class PanList(context: Context) : ListView(context) {
-    var nameOffset = 0
+    var contentWidth = 0f          // widest name of the list in px
+    var offset = 0                 // px, the same for every visible row
+    var onRange: ((Int, Int) -> Unit)? = null
     private var ignore = false
     private var two = false
     private var startX = 0f
@@ -154,17 +125,37 @@ private class PanList(context: Context) : ListView(context) {
 
     private fun meanX(ev: MotionEvent) = (ev.getX(0) + ev.getX(1)) / 2f
 
-    private fun maxOffset(): Int {
-        var m = 0
+    /** Visible width of the names (narrowest visible row), 0 before the first layout. */
+    private fun viewportWidth(): Int {
+        var w = Int.MAX_VALUE
         for (i in 0 until childCount) {
             val r = getChildAt(i) as? NameRow ?: continue
-            m = maxOf(m, r.content.width - r.scroller.width)
+            w = minOf(w, r.clip.width)
         }
-        return m
+        return if (w == Int.MAX_VALUE) 0 else w
+    }
+
+    fun maxOffset(): Int = maxOf(0, (contentWidth - viewportWidth()).toInt())
+
+    fun setOffset(x: Int) {
+        offset = x.coerceIn(0, maxOffset())
+        applyOffset()
+    }
+
+    /** Puts a (re)used row at the shared offset. */
+    fun applyTo(row: NameRow) {
+        row.content.translationX = -offset.toFloat()
     }
 
     fun applyOffset() {
-        for (i in 0 until childCount) (getChildAt(i) as? NameRow)?.scroller?.setOffset(nameOffset)
+        for (i in 0 until childCount) (getChildAt(i) as? NameRow)?.let { applyTo(it) }
+        onRange?.invoke(maxOffset(), offset)
+    }
+
+    override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
+        super.onLayout(changed, l, t, r, b)
+        offset = offset.coerceIn(0, maxOffset())
+        applyOffset()
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
@@ -182,12 +173,12 @@ private class PanList(context: Context) : ListView(context) {
                 c.recycle()
                 parent?.requestDisallowInterceptTouchEvent(true)
                 startX = meanX(ev)
-                startOffset = nameOffset
+                startOffset = offset
                 return true
             }
             MotionEvent.ACTION_MOVE -> if (ignore) {
                 if (two && ev.pointerCount >= 2) {
-                    nameOffset = (startOffset - (meanX(ev) - startX)).toInt().coerceIn(0, maxOffset())
+                    offset = (startOffset - (meanX(ev) - startX)).toInt().coerceIn(0, maxOffset())
                     applyOffset()
                 }
                 return true
@@ -210,7 +201,7 @@ private class TreeRow(ctx: Context) : LinearLayout(ctx), NameRow {
     val chevron = TextView(ctx)
     val icon = ImageView(ctx)
     val label = TextView(ctx)
-    override val scroller = NoTouchScroll(ctx)
+    override val clip = FrameLayout(ctx)
     override val content: View get() = label
 
     init {
@@ -219,22 +210,21 @@ private class TreeRow(ctx: Context) : LinearLayout(ctx), NameRow {
         layoutParams = rowParams(ctx.dp(48))
         chevron.gravity = Gravity.CENTER
         chevron.textSize = 14f
-        addView(chevron, LayoutParams(ctx.dp(40), ViewGroup.LayoutParams.MATCH_PARENT))
-        icon.setImageResource(R.drawable.ic_folder)
-        addView(icon, LayoutParams(ctx.dp(24), ctx.dp(24)))
+        addView(chevron, LayoutParams(ctx.dp(36), ViewGroup.LayoutParams.MATCH_PARENT))
+        icon.scaleType = ImageView.ScaleType.FIT_XY
+        addView(icon, LayoutParams(ctx.dp(22), ctx.dp(26)))
         label.textSize = 15f
         label.maxLines = 1
-        label.setPadding(ctx.dp(10), 0, ctx.dp(12), 0)
-        scroller.addView(label, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(scroller, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        label.setPadding(ctx.dp(8), 0, ctx.dp(12), 0)
+        clip.addView(label, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_VERTICAL))
+        addView(clip, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
     }
 }
 
 private class FileRow(ctx: Context) : LinearLayout(ctx), NameRow {
-    val boxHit = FrameLayout(ctx)
-    val box = TextView(ctx)
+    val iconHit = FrameLayout(ctx)     // the icon is the check box: tap = mark, rest of the row = open
     val icon = ImageView(ctx)
-    override val scroller = NoTouchScroll(ctx)
+    override val clip = FrameLayout(ctx)
     val inner = LinearLayout(ctx)
     override val content: View get() = inner
     val name = TextView(ctx)
@@ -244,25 +234,20 @@ private class FileRow(ctx: Context) : LinearLayout(ctx), NameRow {
         orientation = HORIZONTAL
         gravity = Gravity.CENTER_VERTICAL
         layoutParams = rowParams(ctx.dp(56))
-        setPadding(ctx.dp(4), 0, ctx.dp(14), 0)
-        box.gravity = Gravity.CENTER
-        box.textSize = 13f
-        box.setTextColor(Color.WHITE)
-        // Only the check box marks: a 48dp wide touch target around the 22dp box.
-        boxHit.addView(box, FrameLayout.LayoutParams(ctx.dp(22), ctx.dp(22), Gravity.CENTER))
-        addView(boxHit, LayoutParams(ctx.dp(48), ViewGroup.LayoutParams.MATCH_PARENT))
-        addView(icon, LayoutParams(ctx.dp(44), ctx.dp(44)))
-        icon.setPadding(ctx.dp(8), ctx.dp(8), ctx.dp(8), ctx.dp(8))
+        setPadding(0, 0, ctx.dp(14), 0)
+        icon.scaleType = ImageView.ScaleType.FIT_XY
+        iconHit.addView(icon, FrameLayout.LayoutParams(ctx.dp(38), ctx.dp(44), Gravity.CENTER))
+        addView(iconHit, LayoutParams(ctx.dp(48), ViewGroup.LayoutParams.MATCH_PARENT))
         inner.orientation = VERTICAL
-        inner.setPadding(ctx.dp(6), 0, 0, 0)
+        inner.setPadding(ctx.dp(8), 0, ctx.dp(12), 0)
         name.textSize = 15f
         name.maxLines = 1
         meta.textSize = 12f
         meta.maxLines = 1
         inner.addView(name)
         inner.addView(meta)
-        scroller.addView(inner, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        addView(scroller, LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        clip.addView(inner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_VERTICAL))
+        addView(clip, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
     }
 }
 
@@ -278,12 +263,10 @@ class MainActivity : Activity() {
     private val tabs = ArrayList<TextView>()
     private var roots: List<File> = emptyList()
     private val rootNames = HashMap<String, String>()
-    private val iconCache = HashMap<String, Drawable?>()
     private val loader = Executors.newSingleThreadExecutor()   // directory reads, off the UI thread
     private val counter = Executors.newSingleThreadExecutor()  // folder item counts
     private val counts = HashMap<String, Int>()                // UI thread only
     private val countsPending = HashSet<String>()              // UI thread only
-    private val dateFmt by lazy { DateFormat.getDateFormat(this) }
     private var backAt = 0L
 
     @Suppress("DEPRECATION")
@@ -307,7 +290,7 @@ class MainActivity : Activity() {
         )
         for (p in panes) expandTo(p, p.dir)
 
-        val root = android.widget.FrameLayout(this)
+        val root = FrameLayout(this)
         root.setBackgroundColor(getColor(R.color.md_surface))
         root.setOnApplyWindowInsetsListener { v, insets ->
             val s = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
@@ -349,7 +332,6 @@ class MainActivity : Activity() {
         val ok = Environment.isExternalStorageManager()
         mainView.visibility = if (ok) View.VISIBLE else View.GONE
         permView.visibility = if (ok) View.GONE else View.VISIBLE
-        iconCache.clear()
         if (ok) refreshAll()
     }
 
@@ -456,6 +438,26 @@ class MainActivity : Activity() {
         return l
     }
 
+    /** Scroll bar under a list: visible only when the names are wider than the list; dragging it scrolls the names. */
+    private fun rangeBar(list: PanList): SeekBar {
+        val bar = SeekBar(this)
+        bar.visibility = View.GONE
+        bar.setPadding(dp(12), 0, dp(12), 0)
+        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
+                if (fromUser) list.setOffset(progress)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar) = Unit
+        })
+        list.onRange = { max, off ->
+            bar.max = max
+            if (bar.progress != off) bar.progress = off
+            bar.visibility = if (max > 0) View.VISIBLE else View.GONE
+        }
+        return bar
+    }
+
     private fun buildTree(p: Pane): View {
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
@@ -471,6 +473,7 @@ class MainActivity : Activity() {
             pager.snapTo(p.filePage)
         }
         page.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        page.addView(rangeBar(list))
         return page
     }
 
@@ -492,7 +495,7 @@ class MainActivity : Activity() {
         p.fileList = list
         p.fileAdapter = FileAdapter(p)
         list.adapter = p.fileAdapter
-        // One tap opens (folder, or file in its default app); marking is only done with the check box.
+        // One tap opens (folder, or file in its default app); marking is only done with the icon.
         list.setOnItemClickListener { _, _, pos, _ ->
             val e = p.entries[pos]
             if (e.up || e.isDir) open(p, e.file) else openFile(e.file)
@@ -507,6 +510,7 @@ class MainActivity : Activity() {
             true
         }
         page.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        page.addView(rangeBar(list))
         return page
     }
 
@@ -542,65 +546,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---- State ----
-
-    private fun expandTo(p: Pane, dir: File) {
-        var f: File? = dir
-        while (f != null) {
-            p.expanded.add(f.path)
-            f = f.parentFile
-        }
-    }
-
-    private fun open(p: Pane, dir: File) {
-        if (!dir.canRead()) return
-        p.dir = dir
-        p.selected.clear()
-        expandTo(p, dir)
-        p.treeList.nameOffset = 0
-        p.fileList.nameOffset = 0
-        loadPane(p)
-        updateBar()
-    }
-
-    private fun toggle(p: Pane, f: File) {
-        if (!p.selected.remove(f)) p.selected.add(f)
-        for (other in panes) if (other !== p) other.selected.clear()
-        refreshSelection()
-    }
-
-    /** Tree rows for the given expanded folders. Runs on the loader thread. */
-    private fun buildNodes(expanded: Set<String>): List<Node> {
-        val out = ArrayList<Node>()
-        fun add(f: File, depth: Int, label: String) {
-            out.add(Node(f, depth, label))
-            if (expanded.contains(f.path)) {
-                val subs = f.listFiles { x -> x.isDirectory }.orEmpty().sortedBy { it.name.lowercase() }
-                for (s in subs) add(s, depth + 1, s.name)
-            }
-        }
-        for (r in roots) add(r, 0, rootNames[r.path] ?: r.name)
-        return out
-    }
-
-    /** File list of [dir]: one attribute call per entry, sorted once (folders first). Runs on the loader thread. */
-    private fun buildEntries(dir: File, showUp: Boolean): List<Entry> {
-        val out = ArrayList<Entry>()
-        if (showUp) dir.parentFile?.let { out.add(Entry(it, true, isDir = true)) }
-        val files = dir.listFiles().orEmpty().map { f ->
-            try {
-                val a = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java)
-                Entry(f, false, a.isDirectory, a.size(), a.lastModifiedTime().toMillis())
-            } catch (e: IOException) {
-                Entry(f, false)
-            }
-        }
-        out.addAll(files.sortedWith(compareBy({ !it.isDir }, { it.key })))
-        return out
-    }
-
-    private fun label(p: Pane) = getString(p.bandRes) + " · " + p.dir.path
-
     private fun chip(onClick: () -> Unit) = TextView(this).apply {
         textSize = 12f
         maxLines = 1
@@ -620,6 +565,33 @@ class MainActivity : Activity() {
         p.sortChip.text = getString(R.string.chip_sort, getString(p.sortBy.label), arrow)
         val name = if (p.nameQuery.isEmpty()) "" else " · \"${p.nameQuery}\""
         p.filterChip.text = getString(R.string.chip_filter, getString(p.filter.label), name)
+    }
+
+    // ---- State ----
+
+    private fun expandTo(p: Pane, dir: File) {
+        var f: File? = dir
+        while (f != null) {
+            p.expanded.add(f.path)
+            f = f.parentFile
+        }
+    }
+
+    private fun open(p: Pane, dir: File) {
+        if (!dir.canRead()) return
+        p.dir = dir
+        p.selected.clear()
+        expandTo(p, dir)
+        p.treeList.offset = 0
+        p.fileList.offset = 0
+        loadPane(p)
+        updateBar()
+    }
+
+    private fun toggle(p: Pane, f: File) {
+        if (!p.selected.remove(f)) p.selected.add(f)
+        for (other in panes) if (other !== p) other.selected.clear()
+        refreshSelection()
     }
 
     /** Sort and filter of the in-memory list: no disk access. Folders always come first. */
@@ -649,6 +621,7 @@ class MainActivity : Activity() {
         p.entries = viewOf(p)
         p.fileAdapter.notifyDataSetChanged()
         updateChips(p)
+        p.fileList.requestLayout()
     }
 
     private fun showSortDialog(p: Pane) {
@@ -696,6 +669,56 @@ class MainActivity : Activity() {
             .show()
     }
 
+    /** Tree rows for the given expanded folders. Runs on the loader thread. */
+    private fun buildNodes(expanded: Set<String>): List<Node> {
+        val out = ArrayList<Node>()
+        val paint = textPaint(15f)
+        fun add(f: File, depth: Int, label: String) {
+            out.add(Node(f, depth, label, paint.measureText(label)))
+            if (expanded.contains(f.path)) {
+                val subs = f.listFiles { x -> x.isDirectory }.orEmpty().sortedBy { it.name.lowercase() }
+                for (s in subs) add(s, depth + 1, s.name)
+            }
+        }
+        for (r in roots) add(r, 0, rootNames[r.path] ?: r.name)
+        return out
+    }
+
+    /** File list of [dir]: one attribute call per entry, sorted once (folders first). Runs on the loader thread. */
+    private fun buildEntries(dir: File, showUp: Boolean): List<Entry> {
+        val out = ArrayList<Entry>()
+        val df = DateFormat.getDateFormat(this)
+        val namePaint = textPaint(15f)
+        val metaPaint = textPaint(12f)
+        fun finish(e: Entry): Entry {
+            if (e.up) {
+                e.width = namePaint.measureText(getString(R.string.up))
+            } else {
+                e.meta = if (e.isDir) getString(R.string.items_count, 9999)
+                else Formatter.formatShortFileSize(this, e.size) + " · " + df.format(Date(e.modified))
+                e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
+            }
+            return e
+        }
+        if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
+        val files = dir.listFiles().orEmpty().map { f ->
+            try {
+                val a = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java)
+                Entry(f, false, a.isDirectory, a.size(), a.lastModifiedTime().toMillis())
+            } catch (e: IOException) {
+                Entry(f, false)
+            }
+        }
+        out.addAll(files.map { finish(it) }.sortedWith(compareBy({ !it.isDir }, { it.key })))
+        return out
+    }
+
+    private fun textPaint(sp: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp * resources.displayMetrics.scaledDensity
+    }
+
+    private fun label(p: Pane) = getString(p.bandRes) + " · " + p.dir.path
+
     /** Re-reads one pane in the background; a newer load of the same pane wins. */
     private fun loadPane(p: Pane) {
         val gen = ++p.gen
@@ -713,8 +736,12 @@ class MainActivity : Activity() {
                 p.raw = entries
                 p.entries = viewOf(p)
                 updateChips(p)
+                p.treeList.contentWidth = nodes.maxOfOrNull { it.width + dp(40) } ?: 0f
+                p.fileList.contentWidth = entries.maxOfOrNull { it.width } ?: 0f
                 p.treeAdapter.notifyDataSetChanged()
                 p.fileAdapter.notifyDataSetChanged()
+                p.treeList.requestLayout()
+                p.fileList.requestLayout()
             }
         }
     }
@@ -823,30 +850,6 @@ class MainActivity : Activity() {
     private fun defaultApp(f: File): ResolveInfo? =
         packageManager.resolveActivity(viewIntent(f), 0)?.takeUnless { isChooser(it) }
 
-    /**
-     * Icon of the app the user chose for this file type: the one picked in "Öffnen mit…" (remembered),
-     * else the default app. No guessing: without either, the generic file icon stays.
-     */
-    @Suppress("DEPRECATION")
-    private fun appIcon(f: File): Drawable? {
-        val ext = f.extension.lowercase()
-        if (ext.isEmpty()) return null
-        if (!iconCache.containsKey(ext)) {
-            val pm = packageManager
-            val remembered = getSharedPreferences(CHOICES_PREFS, MODE_PRIVATE).getString(ext, null)
-                ?.let { ComponentName.unflattenFromString(it) }
-            val info = try {
-                if (remembered != null) pm.getApplicationInfo(remembered.packageName, 0)
-                else defaultApp(f)?.activityInfo?.applicationInfo
-            } catch (e: PackageManager.NameNotFoundException) {
-                null
-            }
-            iconCache[ext] = info?.takeIf { it.icon != 0 }?.loadIcon(pm)
-        }
-        val d = iconCache[ext] ?: return null
-        return d.constantState?.newDrawable() ?: d
-    }
-
     private fun viewIntent(f: File): Intent {
         val uri = Uri.Builder().scheme("content").authority("$packageName.files").path(f.absolutePath).build()
         return Intent(Intent.ACTION_VIEW)
@@ -862,16 +865,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Chooser for "Öffnen mit…": the pick is reported back to [ChooserReceiver] and remembered per extension. */
-    private fun chooser(f: File): Intent {
-        val ext = f.extension.lowercase()
-        val base = Intent(this, ChooserReceiver::class.java).setData(Uri.parse("dualfiles://choice/$ext"))
-        val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
-        val pi = PendingIntent.getBroadcast(this, ext.hashCode(), base, flags)
-        return Intent.createChooser(viewIntent(f), getString(R.string.open_with), pi.intentSender)
-    }
+    /** Android's app chooser for "Öffnen mit…". */
+    private fun chooser(f: File): Intent = Intent.createChooser(viewIntent(f), getString(R.string.open_with))
 
-    /** Tap: the default app opens directly; without a default, Android's chooser asks (and the pick is remembered). */
+    /** Tap: the default app opens directly; without a default, Android's chooser asks. */
     private fun openFile(f: File) = start(if (defaultApp(f) != null) viewIntent(f) else chooser(f))
 
     private fun openWith(f: File) = start(chooser(f))
@@ -896,11 +893,11 @@ class MainActivity : Activity() {
                 if (!p.expanded.remove(n.file.path)) p.expanded.add(n.file.path)
                 loadPane(p)
             }
-            row.icon.imageTintList = android.content.res.ColorStateList.valueOf(p.color)
+            row.icon.setImageDrawable(EntryIcon("", true, p.color, Color.WHITE, false, p.color))
             row.label.text = n.label
             row.label.setTextColor(getColor(R.color.md_on_surface))
             row.label.typeface = if (current) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            row.scroller.setOffset(p.treeList.nameOffset)
+            p.treeList.applyTo(row)
             return row
         }
     }
@@ -915,29 +912,15 @@ class MainActivity : Activity() {
             val e = p.entries[position]
             val f = e.file
             val sel = !e.up && p.selected.contains(f)
-            row.setBackgroundColor(if (sel) getColor(R.color.md_container) else Color.TRANSPARENT)
-
-            val box = GradientDrawable()
-            box.cornerRadius = dp(5).toFloat()
-            box.setStroke(dp(2), if (sel) p.color else getColor(R.color.md_outline))
-            if (sel) box.setColor(p.color)
-            row.box.background = box
-            row.box.text = if (sel) "✓" else ""
-            row.boxHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
-            row.boxHit.setOnClickListener { toggle(p, f) }
-
             val isDir = e.up || e.isDir
-            val appDrawable = if (isDir) null else appIcon(f)
-            if (appDrawable != null) {
-                row.icon.setImageDrawable(appDrawable)
-                row.icon.imageTintList = null
-            } else {
-                row.icon.setImageResource(if (isDir) R.drawable.ic_folder else R.drawable.ic_file)
-                row.icon.imageTintList = android.content.res.ColorStateList.valueOf(
-                    if (isDir) p.color else getColor(R.color.md_on_surface_variant)
-                )
-            }
-            row.scroller.setOffset(p.fileList.nameOffset)
+            row.setBackgroundColor(if (sel) tint(p.color) else Color.TRANSPARENT)
+
+            // Icon: filled folder, or the file's extension on a colour from its hue; check badge when marked.
+            val ext = if (isDir) "" else f.extension.lowercase().take(4)
+            val (fill, text) = if (isDir) Pair(p.color, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
+            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color))
+            row.iconHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
+            row.iconHit.setOnClickListener { toggle(p, f) }
 
             row.name.text = if (e.up) getString(R.string.up) else f.name
             row.name.setTextColor(getColor(R.color.md_on_surface))
@@ -945,10 +928,12 @@ class MainActivity : Activity() {
             row.meta.text = when {
                 e.up -> ""
                 e.isDir -> childCount(f.path)?.let { getString(R.string.items_count, it) } ?: "…"
-                else -> Formatter.formatShortFileSize(this@MainActivity, e.size) + " · " +
-                    dateFmt.format(Date(e.modified))
+                else -> e.meta
             }
+            p.fileList.applyTo(row)
             return row
         }
     }
+
+    private fun tint(c: Int) = Color.argb(0x40, Color.red(c), Color.green(c), Color.blue(c))
 }

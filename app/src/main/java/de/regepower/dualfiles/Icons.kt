@@ -1,0 +1,233 @@
+package de.regepower.dualfiles
+
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.ColorFilter
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.PixelFormat
+import android.graphics.Typeface
+import android.graphics.drawable.Drawable
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.cbrt
+import kotlin.math.cos
+import kotlin.math.max
+import kotlin.math.min
+import kotlin.math.pow
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+/**
+ * "Vivid" colours from the avatar tool: OKLCH, hue from the file extension, text at least 4.5:1 on the background.
+ * Same maths as the HTML preview, so the phone shows the colours that were approved there.
+ */
+internal object VividColors {
+    private const val BG_L = 0.58
+    private const val BG_C = 0.16
+    private const val FG_C = 0.07
+    private const val TARGET = 4.5
+
+    private val cache = HashMap<String, Pair<Int, Int>>()   // extension -> (background, text); UI thread only
+
+    /** Background and text colour (ARGB) for an extension. */
+    fun colorsFor(ext: String): Pair<Int, Int> = cache.getOrPut(ext) {
+        val hue = (abs(hash(ext).toLong()) % 360).toDouble()
+        var bgL = BG_L
+        var bg = oklchToRgb(bgL, BG_C, hue)
+        var fg = pickForeground(bg, hue)
+        var i = 0
+        while (fg == null && i < 60) {
+            bgL -= 0.01
+            if (bgL <= 0.05) break
+            bg = oklchToRgb(bgL, BG_C, hue)
+            fg = pickForeground(bg, hue)
+            i++
+        }
+        val text = fg?.let { Color.rgb(it[0], it[1], it[2]) } ?: fallbackText(bg)
+        Pair(Color.rgb(bg[0], bg[1], bg[2]), text)
+    }
+
+    // 32-bit wrap like the JavaScript version (h = (h << 5) - h + c; h |= 0)
+    private fun hash(s: String): Int {
+        var h = 0
+        for (c in s) h = (h shl 5) - h + c.code
+        return h
+    }
+
+    private fun toLinear(c: Double) = if (c <= 0.04045) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
+
+    private fun toGamma(c: Double): Double {
+        val v = c.coerceIn(0.0, 1.0)
+        return if (v <= 0.0031308) v * 12.92 else 1.055 * v.pow(1 / 2.4) - 0.055
+    }
+
+    private fun oklchToLinear(l: Double, c: Double, hDeg: Double): DoubleArray {
+        val h = hDeg * PI / 180
+        val a = c * cos(h)
+        val b = c * sin(h)
+        val l3 = l + 0.3963377774 * a + 0.2158037573 * b
+        val m3 = l - 0.1055613458 * a - 0.0638541728 * b
+        val s3 = l - 0.0894841775 * a - 1.2914855480 * b
+        val lc = l3 * l3 * l3
+        val mc = m3 * m3 * m3
+        val sc = s3 * s3 * s3
+        return doubleArrayOf(
+            4.0767416621 * lc - 3.3077115913 * mc + 0.2309699292 * sc,
+            -1.2684380046 * lc + 2.6097574011 * mc - 0.3413193965 * sc,
+            -0.0041960863 * lc - 0.7034186147 * mc + 1.7076147010 * sc
+        )
+    }
+
+    private fun inGamut(lin: DoubleArray) = lin.all { it >= -0.0001 && it <= 1.0001 }
+
+    /** Reduces chroma by bisection until the colour is displayable in sRGB. */
+    private fun oklchToRgb(l: Double, c: Double, hue: Double): IntArray {
+        var chroma = c
+        if (!inGamut(oklchToLinear(l, chroma, hue))) {
+            var lo = 0.0
+            var hi = chroma
+            repeat(20) {
+                val mid = (lo + hi) / 2
+                if (inGamut(oklchToLinear(l, mid, hue))) lo = mid else hi = mid
+            }
+            chroma = lo
+        }
+        return oklchToLinear(l, chroma, hue).map { (toGamma(it) * 255).roundToInt() }.toIntArray()
+    }
+
+    /** Lightness of an sRGB colour in OKLCH. */
+    private fun oklightness(rgb: IntArray): Double {
+        val r = toLinear(rgb[0] / 255.0)
+        val g = toLinear(rgb[1] / 255.0)
+        val b = toLinear(rgb[2] / 255.0)
+        val l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+        val m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+        val s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+        return 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s
+    }
+
+    private fun luminance(rgb: IntArray): Double {
+        val lin = rgb.map {
+            val c = it / 255.0
+            if (c <= 0.03928) c / 12.92 else ((c + 0.055) / 1.055).pow(2.4)
+        }
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+    }
+
+    private fun contrast(a: IntArray, b: IntArray): Double {
+        val l1 = luminance(a)
+        val l2 = luminance(b)
+        return (max(l1, l2) + 0.05) / (min(l1, l2) + 0.05)
+    }
+
+    /** Lighter tint of the same hue that reaches the contrast target, or null. */
+    private fun pickForeground(bg: IntArray, hue: Double): IntArray? {
+        val bgL = oklightness(bg)
+        for (step in 1..50) {
+            val l = bgL + step * 0.02
+            if (l <= 0.02 || l >= 0.995) break
+            val rgb = oklchToRgb(l, FG_C, hue)
+            if (contrast(rgb, bg) >= TARGET) return rgb
+        }
+        return null
+    }
+
+    private fun fallbackText(bg: IntArray): Int {
+        val white = intArrayOf(255, 255, 255)
+        val black = intArrayOf(17, 17, 17)
+        return if (contrast(bg, white) >= contrast(bg, black)) Color.WHITE else Color.rgb(17, 17, 17)
+    }
+}
+
+/** Font size so that the label fills the width of the file icon (max. 44 units of the 48-unit icon). */
+internal object IconText {
+    private val measure = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.DEFAULT_BOLD
+        textSize = 100f
+    }
+    private val sizes = HashMap<String, Float>()   // UI thread only
+
+    fun sizeFor(label: String): Float = sizes.getOrPut(label) {
+        val emWidth = measure.measureText(label) / 100f
+        if (emWidth <= 0f) 44f else min(44f, 41f / emWidth)
+    }
+}
+
+/**
+ * Generated icon in the app's own style, drawn in a 48 x 56 unit box:
+ * a file with folded corner and the extension inside, or a filled folder.
+ * [selected] adds a check badge at the bottom right.
+ */
+internal class EntryIcon(
+    private val label: String,
+    private val isFolder: Boolean,
+    private val fill: Int,
+    private val textColor: Int,
+    private val selected: Boolean,
+    private val badge: Int,
+) : Drawable() {
+
+    override fun draw(canvas: Canvas) {
+        val b = bounds
+        canvas.save()
+        canvas.translate(b.left.toFloat(), b.top.toFloat())
+        canvas.scale(b.width() / 48f, b.height() / 56f)
+
+        fillPaint.color = fill
+        canvas.drawPath(if (isFolder) FOLDER else FILE, fillPaint)
+        if (!isFolder) {
+            fillPaint.color = 0x38000000
+            canvas.drawPath(FOLD, fillPaint)
+            if (label.isNotEmpty()) {
+                textPaint.color = textColor
+                textPaint.textSize = IconText.sizeFor(label)
+                canvas.drawText(label, 24f, 36f + textPaint.textSize * 0.36f, textPaint)
+            }
+        }
+        if (selected) {
+            val cx = 40f
+            val cy = 50f
+            fillPaint.color = Color.WHITE
+            canvas.drawCircle(cx, cy, 8.5f, fillPaint)
+            fillPaint.color = badge
+            canvas.drawCircle(cx, cy, 7f, fillPaint)
+            val check = Path().apply {
+                moveTo(cx - 3.5f, cy)
+                lineTo(cx - 1f, cy + 2.8f)
+                lineTo(cx + 3.8f, cy - 2.8f)
+            }
+            canvas.drawPath(check, checkPaint)
+        }
+        canvas.restore()
+    }
+
+    override fun setAlpha(alpha: Int) = Unit
+    override fun setColorFilter(colorFilter: ColorFilter?) = Unit
+    @Suppress("DEPRECATION")
+    override fun getOpacity() = PixelFormat.TRANSLUCENT
+
+    private companion object {
+        val FILE = Path().apply {
+            moveTo(0f, 0f); lineTo(32f, 0f); lineTo(48f, 16f); lineTo(48f, 56f); lineTo(0f, 56f); close()
+        }
+        val FOLD = Path().apply {
+            moveTo(32f, 0f); lineTo(32f, 16f); lineTo(48f, 16f); close()
+        }
+        val FOLDER = Path().apply {
+            moveTo(0f, 8f); lineTo(18f, 8f); lineTo(23f, 14f); lineTo(48f, 14f); lineTo(48f, 52f); lineTo(0f, 52f); close()
+        }
+        val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            typeface = Typeface.DEFAULT_BOLD
+            textAlign = Paint.Align.CENTER
+        }
+        val checkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 2.4f
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+            color = Color.WHITE
+        }
+    }
+}
