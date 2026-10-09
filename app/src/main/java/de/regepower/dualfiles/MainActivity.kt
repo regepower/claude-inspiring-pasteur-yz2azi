@@ -41,10 +41,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
-import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import android.window.OnBackInvokedDispatcher
@@ -98,8 +98,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     val expanded = HashSet<String>()
     var nodes: List<Node> = emptyList()
     var entries: List<Entry> = emptyList()
-    lateinit var treeBand: TextView
-    lateinit var fileBand: TextView
+    lateinit var fileBand: CrumbBar
     lateinit var treeAdapter: BaseAdapter
     lateinit var fileAdapter: BaseAdapter
     lateinit var treeList: PanList
@@ -129,7 +128,7 @@ private interface NameRow {
 private class PanList(context: Context) : ListView(context) {
     var contentWidth = 0f          // widest name of the list in px
     var offset = 0                 // px, the same for every visible row
-    var onRange: ((Int, Int) -> Unit)? = null
+    var onRange: ((Int, Int, Int) -> Unit)? = null
     private var ignore = false
     private var two = false
     private var startX = 0f
@@ -149,6 +148,8 @@ private class PanList(context: Context) : ListView(context) {
 
     fun maxOffset(): Int = maxOf(0, (contentWidth - viewportWidth()).toInt())
 
+    fun viewport(): Int = viewportWidth().takeIf { it > 0 } ?: width
+
     fun shiftNames(x: Int) {
         offset = x.coerceIn(0, maxOffset())
         applyOffset()
@@ -161,7 +162,7 @@ private class PanList(context: Context) : ListView(context) {
 
     fun applyOffset() {
         for (i in 0 until childCount) (getChildAt(i) as? NameRow)?.let { applyTo(it) }
-        onRange?.invoke(maxOffset(), offset)
+        onRange?.invoke(contentWidth.toInt(), viewport(), offset)
     }
 
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
@@ -260,6 +261,24 @@ private class FileRow(ctx: Context) : LinearLayout(ctx), NameRow {
         inner.addView(meta)
         clip.addView(inner, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER_VERTICAL))
         addView(clip, LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+    }
+}
+
+/** One-line breadcrumb. A drag on it scrolls it, not the pages. */
+private class CrumbBar(ctx: Context) : HorizontalScrollView(ctx) {
+    val row = LinearLayout(ctx)
+
+    init {
+        isHorizontalScrollBarEnabled = false
+        overScrollMode = OVER_SCROLL_NEVER
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.actionMasked == MotionEvent.ACTION_DOWN) parent?.requestDisallowInterceptTouchEvent(true)
+        return super.onInterceptTouchEvent(ev)
     }
 }
 
@@ -442,18 +461,7 @@ class MainActivity : Activity() {
         return b
     }
 
-    private fun band(p: Pane): TextView {
-        val t = TextView(this)
-        t.setBackgroundColor(p.color)
-        t.setTextColor(Color.WHITE)
-        t.textSize = 12f
-        t.typeface = Typeface.DEFAULT_BOLD
-        t.maxLines = 1
-        t.ellipsize = TextUtils.TruncateAt.START
-        t.movementMethod = LinkMovementMethod.getInstance()
-        t.setPadding(dp(12), dp(8), dp(12), dp(8))
-        return t
-    }
+    private fun band(p: Pane): CrumbBar = CrumbBar(this).apply { setBackgroundColor(p.color) }
 
     private fun <T : ListView> styledList(l: T): T {
         l.divider = ColorDrawable(getColor(R.color.md_outline) and 0x55FFFFFF)
@@ -461,31 +469,17 @@ class MainActivity : Activity() {
         return l
     }
 
-    /** Scroll bar under a list: visible only when the names are wider than the list; dragging it scrolls the names. */
-    private fun rangeBar(list: PanList): SeekBar {
-        val bar = SeekBar(this)
-        bar.visibility = View.GONE
-        bar.setPadding(dp(12), 0, dp(12), 0)
-        bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser) list.shiftNames(progress)
-            }
-            override fun onStartTrackingTouch(sb: SeekBar) = Unit
-            override fun onStopTrackingTouch(sb: SeekBar) = Unit
-        })
-        list.onRange = { max, off ->
-            bar.max = max
-            if (bar.progress != off) bar.progress = off
-            bar.visibility = if (max > 0) View.VISIBLE else View.GONE
-        }
+    /** Scroll bar under a list: its thumb shows the visible share of the names; dragging it moves them. */
+    private fun rangeBar(list: PanList): RangeBar {
+        val bar = RangeBar(this)
+        bar.onDrag = { list.shiftNames(it) }
+        list.onRange = { content, viewport, offset -> bar.update(content, viewport, offset) }
         return bar
     }
 
     private fun buildTree(p: Pane): View {
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        p.treeBand = band(p)
-        page.addView(p.treeBand)
         val list = PanList(this)
         styledList(list)
         p.treeList = list
@@ -496,7 +490,7 @@ class MainActivity : Activity() {
             pager.snapTo(p.filePage)
         }
         page.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        page.addView(rangeBar(list))
+        page.addView(rangeBar(list), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
         return page
     }
 
@@ -533,7 +527,7 @@ class MainActivity : Activity() {
             true
         }
         page.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        page.addView(rangeBar(list))
+        page.addView(rangeBar(list), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
         return page
     }
 
@@ -751,6 +745,218 @@ class MainActivity : Activity() {
         textSize = sp * resources.displayMetrics.scaledDensity
     }
 
+    /** Breadcrumb of the pane's folder: one line from the left edge; every part is tappable, a drag moves it sideways. */
+    private fun updateCrumbs(p: Pane) {
+        val bar = p.fileBand
+        bar.row.removeAllViews()
+        bar.row.addView(crumbText(getString(p.bandRes), null))
+        val root = allRoots().firstOrNull { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") } ?: p.dir
+        val parts = ArrayList<File>()
+        parts.add(root)
+        var cur = root
+        for (name in p.dir.path.removePrefix(root.path).split('/').filter { it.isNotEmpty() }) {
+            cur = File(cur, name)
+            parts.add(cur)
+        }
+        for ((i, dir) in parts.withIndex()) {
+            bar.row.addView(crumbText(" › ", null))
+            bar.row.addView(crumbText(if (i == 0) rootName(root) else dir.name) { open(p, dir) })
+        }
+        bar.scrollTo(0, 0)
+    }
+
+    private fun crumbText(label: String, onClick: (() -> Unit)? = null) = TextView(this).apply {
+        text = label
+        textSize = 13f
+        maxLines = 1
+        setTextColor(Color.WHITE)
+        typeface = Typeface.DEFAULT_BOLD
+        setPadding(dp(4), dp(8), dp(4), dp(8))
+        if (onClick != null) setOnClickListener { onClick() }
+    }
+
+    private fun chip(onClick: () -> Unit) = TextView(this).apply {
+        textSize = 12f
+        maxLines = 1
+        ellipsize = TextUtils.TruncateAt.END
+        gravity = Gravity.CENTER
+        setPadding(dp(8), dp(8), dp(8), dp(8))
+        setTextColor(getColor(R.color.md_on_container))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(8).toFloat()
+            setColor(getColor(R.color.md_container))
+        }
+        setOnClickListener { onClick() }
+    }
+
+    private fun updateChips(p: Pane) {
+        val arrow = if (p.sortDesc) "↓" else "↑"
+        p.sortChip.text = getString(R.string.chip_sort, getString(p.sortBy.label), arrow)
+        val name = if (p.nameQuery.isEmpty()) "" else " · \"${p.nameQuery}\""
+        p.filterChip.text = getString(R.string.chip_filter, getString(p.filter.label), name)
+    }
+
+    // ---- State ----
+
+    private fun expandTo(p: Pane, dir: File) {
+        var f: File? = dir
+        while (f != null) {
+            p.expanded.add(f.path)
+            f = f.parentFile
+        }
+    }
+
+    private fun open(p: Pane, dir: File) {
+        if (!dir.canRead()) return
+        p.dir = dir
+        p.selected.clear()
+        expandTo(p, dir)
+        p.treeList.offset = 0
+        p.fileList.offset = 0
+        loadPane(p)
+        updateBar()
+    }
+
+    private fun toggle(p: Pane, f: File) {
+        if (!p.selected.remove(f)) p.selected.add(f)
+        for (other in panes) if (other !== p) other.selected.clear()
+        refreshSelection()
+    }
+
+    /** Sort and filter of the in-memory list: no disk access. Folders always come first. */
+    private fun viewOf(p: Pane): List<Entry> {
+        val cmp: Comparator<Entry> = when (p.sortBy) {
+            SortBy.NAME -> compareBy<Entry> { it.key }
+            SortBy.DATE -> compareBy<Entry> { it.modified }
+            SortBy.SIZE -> compareBy<Entry> { it.size }
+            SortBy.TYPE -> compareBy<Entry>({ it.file.extension.lowercase() }, { it.key })
+        }
+        val items = p.raw.filter { !it.up && matches(it, p) }
+            .sortedWith(compareBy<Entry> { !it.isDir }.then(if (p.sortDesc) cmp.reversed() else cmp))
+        return p.raw.filter { it.up } + items
+    }
+
+    private fun matches(e: Entry, p: Pane): Boolean {
+        if (p.nameQuery.isNotEmpty() && !e.key.contains(p.nameQuery.lowercase())) return false
+        return when (p.filter) {
+            Filter.ALL -> true
+            Filter.FOLDERS -> e.isDir
+            Filter.FILES -> !e.isDir
+            else -> !e.isDir && p.filter.exts?.contains(e.file.extension.lowercase()) == true
+        }
+    }
+
+    private fun applyView(p: Pane) {
+        p.entries = viewOf(p)
+        p.fileAdapter.notifyDataSetChanged()
+        updateChips(p)
+        p.fileList.requestLayout()
+    }
+
+    private fun showSortDialog(p: Pane) {
+        val values = SortBy.values()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.sort_title)
+            .setSingleChoiceItems(values.map { getString(it.label) }.toTypedArray(), values.indexOf(p.sortBy)) { d, which ->
+                p.sortBy = values[which]
+                applyView(p)
+                d.dismiss()
+            }
+            .setNeutralButton(if (p.sortDesc) R.string.sort_asc else R.string.sort_desc) { _, _ ->
+                p.sortDesc = !p.sortDesc
+                applyView(p)
+            }
+            .show()
+    }
+
+    private fun showFilterDialog(p: Pane) {
+        val values = Filter.values()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.filter_title)
+            .setSingleChoiceItems(values.map { getString(it.label) }.toTypedArray(), values.indexOf(p.filter)) { d, which ->
+                p.filter = values[which]
+                applyView(p)
+                d.dismiss()
+            }
+            .setNeutralButton(R.string.filter_name) { _, _ -> showNameDialog(p) }
+            .show()
+    }
+
+    private fun showNameDialog(p: Pane) {
+        val input = EditText(this)
+        input.setText(p.nameQuery)
+        input.setHint(R.string.filter_name_hint)
+        input.setSingleLine()
+        AlertDialog.Builder(this)
+            .setTitle(R.string.filter_name)
+            .setView(input)
+            .setPositiveButton(R.string.done) { _, _ ->
+                p.nameQuery = input.text.toString().trim()
+                applyView(p)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Tree rows for the given expanded folders. Runs on the loader thread. */
+    private fun buildNodes(expanded: Set<String>): List<Node> {
+        val out = ArrayList<Node>()
+        val paint = textPaint(15f)
+        fun add(f: File, depth: Int, label: String) {
+            out.add(Node(f, depth, label, paint.measureText(label)))
+            if (expanded.contains(f.path)) {
+                for (s in subDirs(f)) add(s, depth + 1, s.name)
+            }
+        }
+        for (r in allRoots()) add(r, 0, rootName(r))
+        return out
+    }
+
+    private fun subDirs(f: File): List<File> =
+        if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
+        else f.listFiles { x -> x.isDirectory }.orEmpty().sortedBy { it.name.lowercase() }
+
+    /** File list of [dir]: one attribute call per entry, sorted once (folders first). Runs on the loader thread. */
+    private fun buildEntries(dir: File, showUp: Boolean): List<Entry> {
+        val out = ArrayList<Entry>()
+        val df = DateFormat.getDateFormat(this)
+        val namePaint = textPaint(15f)
+        val metaPaint = textPaint(12f)
+        fun finish(e: Entry): Entry {
+            if (e.up) {
+                e.width = namePaint.measureText(getString(R.string.up))
+            } else {
+                e.meta = if (e.isDir) getString(R.string.items_count, 9999)
+                else Formatter.formatShortFileSize(this, e.size) + " · " + df.format(Date(e.modified))
+                e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
+            }
+            return e
+        }
+        if (Saf.isSaf(dir)) {
+            if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
+            val docs = Saf.list(this, dir).map { d ->
+                finish(Entry(File(dir, d.name), false, d.isDir, d.size, d.modified))
+            }
+            out.addAll(docs.sortedWith(compareBy({ !it.isDir }, { it.key })))
+            return out
+        }
+        if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
+        val files = dir.listFiles().orEmpty().map { f ->
+            try {
+                val a = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java)
+                Entry(f, false, a.isDirectory, a.size(), a.lastModifiedTime().toMillis())
+            } catch (e: IOException) {
+                Entry(f, false)
+            }
+        }
+        out.addAll(files.map { finish(it) }.sortedWith(compareBy({ !it.isDir }, { it.key })))
+        return out
+    }
+
+    private fun textPaint(sp: Float) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = sp * resources.displayMetrics.scaledDensity
+    }
+
     /** Breadcrumb of the pane's folder: every part is tappable. Too long paths lose the front part (ellipsis at the start). */
     private fun crumbs(p: Pane): CharSequence {
         val sb = SpannableStringBuilder(getString(p.bandRes))
@@ -781,8 +987,7 @@ class MainActivity : Activity() {
         val gen = ++p.gen
         val dir = p.dir
         val expanded = HashSet(p.expanded)
-        p.treeBand.text = crumbs(p)
-        p.fileBand.text = crumbs(p)
+        updateCrumbs(p)
         loader.execute {
             val nodes = buildNodes(expanded)
             val showUp = allRoots().none { it.path == dir.path } && dir.parentFile?.canRead() == true
