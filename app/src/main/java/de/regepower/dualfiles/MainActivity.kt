@@ -137,7 +137,7 @@ private class PanList(context: Context) : ListView(context) {
 
     fun maxOffset(): Int = maxOf(0, (contentWidth - viewportWidth()).toInt())
 
-    fun setOffset(x: Int) {
+    fun shiftNames(x: Int) {
         offset = x.coerceIn(0, maxOffset())
         applyOffset()
     }
@@ -445,7 +445,7 @@ class MainActivity : Activity() {
         bar.setPadding(dp(12), 0, dp(12), 0)
         bar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, progress: Int, fromUser: Boolean) {
-                if (fromUser) list.setOffset(progress)
+                if (fromUser) list.shiftNames(progress)
             }
             override fun onStartTrackingTouch(sb: SeekBar) = Unit
             override fun onStopTrackingTouch(sb: SeekBar) = Unit
