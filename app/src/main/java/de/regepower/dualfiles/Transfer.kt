@@ -41,6 +41,21 @@ internal object Transfer {
         return Saf.delete(ctx, f)
     }
 
+    /** Renames [f] in its folder; false if the name is taken or invalid. */
+    fun rename(ctx: Context, f: File, name: String): Boolean {
+        if (name.isEmpty() || name.contains('/') || name == "." || name == "..") return false
+        val parent = f.parentFile ?: return false
+        if (isDirectory(ctx, File(parent, name)) != null) return false
+        return if (Saf.isSaf(f)) Saf.rename(ctx, f, name) else f.renameTo(File(parent, name))
+    }
+
+    /** Creates the folder [name] in [dir]; false if it exists or cannot be created. */
+    fun mkdir(ctx: Context, dir: File, name: String): Boolean {
+        if (name.isEmpty() || name.contains('/') || name == "." || name == "..") return false
+        if (isDirectory(ctx, File(dir, name)) != null) return false
+        return if (Saf.isSaf(dir)) Saf.createChild(ctx, dir, name, true) != null else File(dir, name).mkdir()
+    }
+
     private fun copyTree(ctx: Context, src: File, dstDir: File): Boolean {
         val dir = isDirectory(ctx, src) ?: return false
         val target = createChild(ctx, dstDir, src.name, dir) ?: return false

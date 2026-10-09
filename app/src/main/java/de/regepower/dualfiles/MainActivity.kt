@@ -78,7 +78,8 @@ private enum class Filter(val label: Int, val exts: Set<String>? = null) {
 }
 
 /** One row of the folder tree; [width] is the name's width in px. */
-private class Node(val file: File, val depth: Int, val label: String, val width: Float)
+/** [fav]: a favourite at the top of the tree (not unfoldable there). */
+private class Node(val file: File, val depth: Int, val label: String, val width: Float, val fav: Boolean = false)
 
 /** One row of the file list; [up] marks the ".." row, whose [file] is the parent folder. */
 private class Entry(
@@ -302,6 +303,9 @@ class MainActivity : Activity() {
     private val counts = HashMap<String, Int>()                // UI thread only
     private val countsPending = HashSet<String>()              // UI thread only
     private var backAt = 0L
+    private val settings by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
+    @Volatile private var showHidden = false                   // read on the loader thread
+    private fun favorites(): Set<String> = settings.getStringSet("favs", null).orEmpty()
 
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -323,6 +327,7 @@ class MainActivity : Activity() {
             }
         )
         for (p in panes) expandTo(p, p.dir)
+        showHidden = settings.getBoolean("hidden", false)
 
         val root = FrameLayout(this)
         root.setBackgroundColor(getColor(R.color.md_surface))
@@ -508,6 +513,10 @@ class MainActivity : Activity() {
         val lp = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.setMargins(dp(3), 0, dp(3), 0) } }
         chips.addView(p.sortChip, lp())
         chips.addView(p.filterChip, lp())
+        val more = chip { showFolderMenu(p) }
+        more.text = "⋮"
+        more.contentDescription = getString(R.string.folder_menu)
+        chips.addView(more, LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(dp(3), 0, dp(3), 0) })
         page.addView(chips)
         val list = PanList(this)
         styledList(list)
@@ -689,9 +698,13 @@ class MainActivity : Activity() {
     }
 
     /** Tree rows for the given expanded folders. Runs on the loader thread. */
-    private fun buildNodes(expanded: Set<String>): List<Node> {
+    private fun buildNodes(expanded: Set<String>, favs: List<String>): List<Node> {
         val out = ArrayList<Node>()
         val paint = textPaint(15f)
+        for (path in favs) {
+            val label = "★ " + (allRoots().firstOrNull { it.path == path }?.let { rootName(it) } ?: File(path).name)
+            out.add(Node(File(path), 0, label, paint.measureText(label), fav = true))
+        }
         fun add(f: File, depth: Int, label: String) {
             out.add(Node(f, depth, label, paint.measureText(label)))
             if (expanded.contains(f.path)) {
@@ -703,13 +716,17 @@ class MainActivity : Activity() {
     }
 
     private fun subDirs(f: File): List<File> =
-        if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
-        else f.listFiles { x -> x.isDirectory }.orEmpty().sortedBy { it.name.lowercase() }
+        if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir && visible(it.name) }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
+        else f.listFiles { x -> x.isDirectory && visible(x.name) }.orEmpty().sortedBy { it.name.lowercase() }
+
+    /** Names starting with a dot are hidden unless the setting shows them. */
+    private fun visible(name: String) = showHidden || !name.startsWith(".")
 
     /** File list of [dir]: one attribute call per entry, sorted once (folders first). Runs on the loader thread. */
     private fun buildEntries(dir: File, showUp: Boolean): List<Entry> {
         val out = ArrayList<Entry>()
         val df = DateFormat.getDateFormat(this)
+        val tf = DateFormat.getTimeFormat(this)
         val namePaint = textPaint(15f)
         val metaPaint = textPaint(12f)
         fun finish(e: Entry): Entry {
@@ -717,21 +734,21 @@ class MainActivity : Activity() {
                 e.width = namePaint.measureText(getString(R.string.up))
             } else {
                 e.meta = if (e.isDir) getString(R.string.items_count, 9999)
-                else Formatter.formatShortFileSize(this, e.size) + " · " + df.format(Date(e.modified))
+                else Date(e.modified).let { Formatter.formatShortFileSize(this, e.size) + " · " + df.format(it) + " " + tf.format(it) }
                 e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
             }
             return e
         }
         if (Saf.isSaf(dir)) {
             if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
-            val docs = Saf.list(this, dir).map { d ->
+            val docs = Saf.list(this, dir).filter { visible(it.name) }.map { d ->
                 finish(Entry(File(dir, d.name), false, d.isDir, d.size, d.modified))
             }
             out.addAll(docs.sortedWith(compareBy({ !it.isDir }, { it.key })))
             return out
         }
         if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
-        val files = dir.listFiles().orEmpty().map { f ->
+        val files = dir.listFiles().orEmpty().filter { visible(it.name) }.map { f ->
             try {
                 val a = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java)
                 Entry(f, false, a.isDirectory, a.size(), a.lastModifiedTime().toMillis())
@@ -782,9 +799,10 @@ class MainActivity : Activity() {
         val gen = ++p.gen
         val dir = p.dir
         val expanded = HashSet(p.expanded)
+        val favs = favorites().sorted()
         updateCrumbs(p)
         loader.execute {
-            val nodes = buildNodes(expanded)
+            val nodes = buildNodes(expanded, favs)
             val showUp = allRoots().none { it.path == dir.path } && dir.parentFile?.canRead() == true
             val entries = buildEntries(dir, showUp)
             runOnUiThread {
@@ -859,6 +877,8 @@ class MainActivity : Activity() {
                 actions.add(5)
             }
         }
+        labels.add(getString(R.string.rename))
+        actions.add(6)
         labels.add(getString(R.string.copy_to_target))
         actions.add(0)
         labels.add(getString(R.string.move_to_target))
@@ -873,6 +893,7 @@ class MainActivity : Activity() {
                     3 -> openWith(file)
                     4 -> shareSelected()
                     5 -> FilePrint.print(this, uriFor(file), file.name, mime ?: "*/*")
+                    6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
                     else -> act(actions[which])
                 }
             }
@@ -905,6 +926,61 @@ class MainActivity : Activity() {
                 refreshAll()
                 val msg = if (failed == 0) getString(R.string.done) else getString(R.string.done_failed, failed)
                 Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            }
+        }.start()
+    }
+
+    /** Menu of the pane's folder (chip ⋮): new folder, favourite on/off. */
+    private fun showFolderMenu(p: Pane) {
+        val dir = p.dir
+        val isFav = favorites().contains(dir.path)
+        val items = arrayOf(getString(R.string.new_folder), getString(if (isFav) R.string.fav_remove else R.string.fav_add))
+        AlertDialog.Builder(this)
+            .setTitle(allRoots().firstOrNull { it.path == dir.path }?.let { rootName(it) } ?: dir.name)
+            .setItems(items) { _, which ->
+                if (which == 0) {
+                    askName(R.string.new_folder, "") { name -> runOp { Transfer.mkdir(this, dir, name) } }
+                } else {
+                    val favs = HashSet(favorites())
+                    if (isFav) favs.remove(dir.path) else favs.add(dir.path)
+                    settings.edit().putStringSet("favs", favs).apply()
+                    refreshAll()
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Asks for a file or folder name; [onName] gets the trimmed, non-empty input. */
+    private fun askName(title: Int, initial: String, onName: (String) -> Unit) {
+        val input = EditText(this)
+        input.setSingleLine()
+        input.setHint(R.string.name_hint)
+        input.setText(initial)
+        // Pre-select the name without its extension, like Windows
+        val dot = initial.lastIndexOf('.')
+        input.setSelection(0, if (dot > 0) dot else initial.length)
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(input)
+            .setPositiveButton(R.string.done) { _, _ ->
+                val name = input.text.toString().trim()
+                if (name.isNotEmpty() && name != initial) onName(name)
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+        input.requestFocus()
+    }
+
+    /** Runs a single file operation off the UI thread, then reloads both panes. */
+    private fun runOp(op: () -> Boolean) {
+        Thread {
+            val ok = op()
+            runOnUiThread {
+                for (p in panes) p.selected.clear()
+                counts.clear()
+                refreshAll()
+                if (!ok) Toast.makeText(this, R.string.op_failed, Toast.LENGTH_SHORT).show()
             }
         }.start()
     }
@@ -997,6 +1073,7 @@ class MainActivity : Activity() {
             getString(R.string.saf_remove),
             getString(R.string.cfg_save),
             getString(R.string.cfg_load),
+            getString(if (showHidden) R.string.hidden_hide else R.string.hidden_show),
         )
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
@@ -1020,6 +1097,12 @@ class MainActivity : Activity() {
                         Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("application/json"),
                         REQ_LOAD
                     )
+                    5 -> {
+                        showHidden = !showHidden
+                        settings.edit().putBoolean("hidden", showHidden).apply()
+                        counts.clear()
+                        refreshAll()
+                    }
                 }
             }
             .setNegativeButton(R.string.cancel, null)
@@ -1069,11 +1152,12 @@ class MainActivity : Activity() {
         }
     }
 
-    /** The app choices as JSON (format 1). Chosen folders are not exported: their access belongs to this phone. */
+    /** App choices, favourites and the hidden-files setting as JSON (format 1). Chosen folders are not exported: their access belongs to this phone. */
     private fun configJson(): String {
         val assoc = JSONObject()
         for ((k, v) in choices.all) assoc.put(k, v as String)
-        return JSONObject().put("app", packageName).put("format", 1).put("assoc", assoc).toString(2)
+        return JSONObject().put("app", packageName).put("format", 1).put("assoc", assoc)
+            .put("favs", org.json.JSONArray(favorites().sorted())).put("hidden", showHidden).toString(2)
     }
 
     /** Replaces the app choices with the ones in [text]. Throws if it is not one of our files. */
@@ -1085,6 +1169,12 @@ class MainActivity : Activity() {
         for (k in assoc.keys()) edit.putString(k, assoc.getString(k))
         edit.commit()
         assocCache.clear()
+        // Favourites and hidden files are optional: older files do not have them
+        o.optJSONArray("favs")?.let { a -> settings.edit().putStringSet("favs", (0 until a.length()).map { a.getString(it) }.toSet()).apply() }
+        if (o.has("hidden")) {
+            showHidden = o.getBoolean("hidden")
+            settings.edit().putBoolean("hidden", showHidden).apply()
+        }
     }
 
     private fun appLabel(flat: String?): String {
@@ -1145,11 +1235,16 @@ class MainActivity : Activity() {
             val expanded = p.expanded.contains(n.file.path)
             row.setPadding(dp(8 + n.depth * 20), 0, 0, 0)
             row.setBackgroundColor(if (current) getColor(R.color.md_container) else Color.TRANSPARENT)
-            row.chevron.text = if (expanded) "▾" else "▸"
+            row.chevron.text = if (n.fav) "" else if (expanded) "▾" else "▸"
             row.chevron.setTextColor(getColor(R.color.md_on_surface_variant))
             row.chevron.setOnClickListener {
-                if (!p.expanded.remove(n.file.path)) p.expanded.add(n.file.path)
-                loadPane(p)
+                if (n.fav) {
+                    open(p, n.file)
+                    pager.snapTo(p.filePage)
+                } else {
+                    if (!p.expanded.remove(n.file.path)) p.expanded.add(n.file.path)
+                    loadPane(p)
+                }
             }
             row.icon.setImageDrawable(EntryIcon("", true, FOLDER_YELLOW, Color.WHITE, false, p.color))
             row.label.text = n.label

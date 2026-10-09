@@ -10,7 +10,7 @@ import java.io.File
 /**
  * Folders from Android's storage access framework (e.g. Google Drive, Nextcloud), chosen once by the user.
  * They have no file paths, so each one gets a virtual path "/saf/<id>/..." that the file lists use; the
- * names are resolved to document ids on every listing. Copy, move and delete do not work there yet.
+ * names are resolved to document ids on every listing.
  */
 internal object Saf {
     const val PREFIX = "/saf/"
@@ -118,6 +118,16 @@ internal object Saf {
         val created = DocumentsContract.createDocument(ctx.contentResolver, parentUri, mime, name) ?: return null
         val actual = info(ctx, tree, DocumentsContract.getDocumentId(created))?.name ?: name
         return File(dir, actual)
+    }
+
+    /** Gives [f] the name [name]; false if the provider refuses. */
+    fun rename(ctx: Context, f: File, name: String): Boolean {
+        val (tree, docId) = resolve(ctx, f) ?: return false
+        return try {
+            DocumentsContract.renameDocument(ctx.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, docId), name) != null
+        } catch (e: Exception) {
+            false
+        }
     }
 
     fun delete(ctx: Context, f: File): Boolean {
