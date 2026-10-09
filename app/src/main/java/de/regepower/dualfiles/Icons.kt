@@ -1,6 +1,14 @@
 package de.regepower.dualfiles
 
+import android.annotation.SuppressLint
+import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.Canvas
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffColorFilter
+import android.graphics.RectF
+import android.graphics.drawable.AdaptiveIconDrawable
+import android.os.Build
 import android.graphics.Color
 import android.graphics.ColorFilter
 import android.graphics.Paint
@@ -166,6 +174,8 @@ internal class EntryIcon(
     private val textColor: Int,
     private val selected: Boolean,
     private val badge: Int,
+    private val appBadge: Bitmap? = null,
+    private val appTint: Int = 0,
 ) : Drawable() {
 
     override fun draw(canvas: Canvas) {
@@ -184,6 +194,13 @@ internal class EntryIcon(
                 textPaint.textSize = IconText.sizeFor(label)
                 canvas.drawText(label, 24f, 36f + textPaint.textSize * 0.36f, textPaint)
             }
+        }
+        if (appBadge != null) {
+            // The app that opens this type: its silhouette on a white disc, bottom left
+            fillPaint.color = Color.WHITE
+            canvas.drawCircle(8f, 48f, 7.5f, fillPaint)
+            badgePaint.colorFilter = PorterDuffColorFilter(appTint, PorterDuff.Mode.SRC_IN)
+            canvas.drawBitmap(appBadge, null, RectF(3f, 43f, 13f, 53f), badgePaint)
         }
         if (selected) {
             val cx = 40f
@@ -222,6 +239,7 @@ internal class EntryIcon(
             typeface = Typeface.DEFAULT_BOLD
             textAlign = Paint.Align.CENTER
         }
+        val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val checkPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             strokeWidth = 2.4f
@@ -229,5 +247,36 @@ internal class EntryIcon(
             strokeJoin = Paint.Join.ROUND
             color = Color.WHITE
         }
+    }
+}
+
+/**
+ * Icon of an app for the file-type badge: its monochrome layer on Android 13+, otherwise the foreground
+ * layer of its adaptive icon turned into a single-colour silhouette (alpha only).
+ */
+internal object AppBadges {
+    private const val SIZE = 48
+    private val cache = HashMap<String, Bitmap?>()   // UI thread only
+
+    fun get(context: Context, pkg: String): Bitmap? = cache.getOrPut(pkg) { render(context, pkg) }
+
+    @SuppressLint("NewApi")
+    private fun render(context: Context, pkg: String): Bitmap? = try {
+        val icon = context.packageManager.getApplicationIcon(pkg)
+        val src = when {
+            icon !is AdaptiveIconDrawable -> icon
+            Build.VERSION.SDK_INT >= 33 && icon.monochrome != null -> icon.monochrome!!
+            else -> icon.foreground ?: icon
+        }
+        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+        src.setBounds(0, 0, SIZE, SIZE)
+        src.draw(Canvas(bmp))
+        val px = IntArray(SIZE * SIZE)
+        bmp.getPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
+        for (i in px.indices) px[i] = (px[i] ushr 24 shl 24) or 0xFFFFFF
+        bmp.setPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
+        bmp
+    } catch (e: Exception) {
+        null
     }
 }

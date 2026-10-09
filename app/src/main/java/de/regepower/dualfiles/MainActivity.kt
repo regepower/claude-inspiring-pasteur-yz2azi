@@ -365,6 +365,7 @@ class MainActivity : Activity() {
         val ok = Environment.isExternalStorageManager()
         mainView.visibility = if (ok) View.VISIBLE else View.GONE
         permView.visibility = if (ok) View.GONE else View.VISIBLE
+        assocCache.clear()
         if (ok) refreshAll()
     }
 
@@ -939,6 +940,13 @@ class MainActivity : Activity() {
     }
 
     /** Tap: the app remembered for this type opens the file; otherwise the chooser asks and remembers the pick. */
+    private val assocCache = HashMap<String, ComponentName?>()   // UI thread only; cleared when choices change
+
+    private fun assocCached(ext: String): ComponentName? {
+        if (!assocCache.containsKey(ext)) assocCache[ext] = assocFor(ext)
+        return assocCache[ext]
+    }
+
     private fun openFile(f: File) {
         val ext = f.extension.lowercase()
         val cn = assocFor(ext)
@@ -1043,6 +1051,7 @@ class MainActivity : Activity() {
         val edit = choices.edit().clear()
         for (k in assoc.keys()) edit.putString(k, assoc.getString(k))
         edit.commit()
+        assocCache.clear()
     }
 
     private fun appLabel(flat: String?): String {
@@ -1081,6 +1090,7 @@ class MainActivity : Activity() {
                     start(chooserFor(ext, sampleIntent(ext)))
                 } else {
                     choices.edit().remove(ext).apply()
+                    assocCache.clear()
                     showAssociations()
                 }
             }
@@ -1133,7 +1143,8 @@ class MainActivity : Activity() {
             // Icon: filled folder, or the file's extension on a colour from its hue; check badge when marked.
             val ext = if (isDir) "" else f.extension.lowercase().take(4)
             val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
-            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color))
+            val appBitmap = if (isDir) null else assocCached(f.extension.lowercase())?.let { AppBadges.get(this@MainActivity, it.packageName) }
+            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, fill))
             row.iconHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
             row.iconHit.setOnClickListener { toggle(p, f) }
 
