@@ -18,6 +18,7 @@ import android.net.Uri
 import android.app.PendingIntent
 import android.os.Build
 import android.os.Bundle
+import android.os.CancellationSignal
 import android.os.Environment
 import android.os.SystemClock
 import android.os.storage.StorageManager
@@ -881,6 +882,12 @@ class MainActivity : Activity() {
         }
         labels.add(getString(R.string.rename))
         actions.add(6)
+        if (!isDir && Archive.canExtract(file)) {
+            labels.add(getString(R.string.arc_extract))
+            actions.add(7)
+        }
+        labels.add(getString(R.string.arc_zip))
+        actions.add(8)
         labels.add(getString(R.string.copy_to_target))
         actions.add(0)
         labels.add(getString(R.string.move_to_target))
@@ -896,6 +903,14 @@ class MainActivity : Activity() {
                     4 -> shareSelected()
                     5 -> FilePrint.print(this, uriFor(file), file.name, mime ?: "*/*")
                     6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
+                    7 -> runArchive(R.string.arc_extracting) { c -> Archive.extract(this, file, targetDir(), c) }
+                    8 -> {
+                        val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
+                        val base = if (items.size == 1) items[0].nameWithoutExtension.ifEmpty { items[0].name } else getString(R.string.arc_default)
+                        askName(R.string.arc_zip, "$base.zip") { name ->
+                            runArchive(R.string.arc_packing) { c -> Archive.zip(this, items, targetDir(), name, c) }
+                        }
+                    }
                     else -> act(actions[which])
                 }
             }
@@ -972,6 +987,34 @@ class MainActivity : Activity() {
             .setNegativeButton(R.string.cancel, null)
             .show()
         input.requestFocus()
+    }
+
+    /** Folder of the pane without a selection (the other side). */
+    private fun targetDir(): File {
+        val src = panes.firstOrNull { it.selected.isNotEmpty() } ?: panes[0]
+        return (if (src === panes[0]) panes[1] else panes[0]).dir
+    }
+
+    /** Runs a pack/unpack job off the UI thread with a dialog that can cancel it; errors are shown as text. */
+    private fun runArchive(message: Int, job: (CancellationSignal) -> Archive.Result) {
+        val cancel = CancellationSignal()
+        val dialog = AlertDialog.Builder(this)
+            .setMessage(message)
+            .setCancelable(false)
+            .setNegativeButton(R.string.cancel) { _, _ -> cancel.cancel() }
+            .show()
+        Thread {
+            val r = job(cancel)
+            runOnUiThread {
+                if (dialog.isShowing) dialog.dismiss()
+                for (p in panes) p.selected.clear()
+                counts.clear()
+                refreshAll()
+                val err = r.error
+                if (err == null) Toast.makeText(this, R.string.done, Toast.LENGTH_SHORT).show()
+                else AlertDialog.Builder(this).setMessage(err).setPositiveButton(R.string.help_ok, null).show()
+            }
+        }.start()
     }
 
     /** Runs a single file operation off the UI thread, then reloads both panes. */

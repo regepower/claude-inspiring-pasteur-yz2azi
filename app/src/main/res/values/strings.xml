@@ -43,7 +43,7 @@
     <string-array name="help_bodies">
         <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
         <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. Mark: tap the icon on the left, a check appears on it.</item>
-        <item>Hold a row: menu with \"Open with\", share, print, rename, copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
+        <item>Hold a row: menu with \"Open with\", share, print, rename, unpack ZIP/7z, pack as ZIP, copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
         <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page. The ⋮ chip above the list: new folder, add or remove the folder as a favourite (favourites are at the top of the tree with ★). Sort and filter: the two chips above the list.</item>
         <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
     </string-array>
@@ -95,4 +95,16 @@
     <string name="hidden_hide">Hide hidden files</string>
     <string name="thumbs_on">Show previews of pictures and videos</string>
     <string name="thumbs_off">Hide previews of pictures and videos</string>
+    <string name="arc_extract">Unpack to target</string>
+    <string name="arc_zip">Pack as ZIP to target</string>
+    <string name="arc_default">Archive</string>
+    <string name="arc_extracting">Unpacking…</string>
+    <string name="arc_packing">Packing…</string>
+    <string name="arc_read">The archive could not be read.</string>
+    <string name="arc_write">Could not write to the target folder.</string>
+    <string name="arc_memory">Not enough memory for this archive.</string>
+    <string name="arc_unsupported">This archive is not supported (e.g. password protected).</string>
+    <string name="arc_damaged">The archive is damaged or not a valid archive.</string>
+    <string name="arc_bad_path">The archive contains unsafe paths and was not unpacked.</string>
+    <string name="arc_cancelled">Cancelled.</string>
 </resources>

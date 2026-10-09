@@ -22,6 +22,12 @@ android {
         versionName = "1.0.$build"
         // Build day for the help dialog (manifest meta-data, no BuildConfig/resource needed).
         manifestPlaceholders["buildDate"] = LocalDate.now(ZoneId.of("Europe/Berlin")).toString()
+        // 7z extraction in C (src/main/cpp): only 64-bit ARM, which every current phone has.
+        ndk { abiFilters += "arm64-v8a" }
+    }
+
+    externalNativeBuild {
+        cmake { path = file("src/main/cpp/CMakeLists.txt") }
     }
 
     // Release key from CI secrets. Only KEYSTORE_BASE64 + KEYSTORE_PASSWORD are required: without
@@ -71,6 +77,8 @@ android {
     // drop unused Kotlin builtins/metadata resources: -13 KB.
     packaging {
         dex { useLegacyPackaging = true }
+        // Compress the 7z library in the APK as well (unpacked once at install)
+        jniLibs { useLegacyPackaging = true }
         resources {
             excludes += setOf("kotlin/**", "kotlin-tooling-metadata.json", "META-INF/*.version")
         }
@@ -83,4 +91,4 @@ android {
     }
 }
 
-// No dependencies: framework widgets only (RecyclerView removed, ~110 KB).
+// No dependencies: framework widgets only (RecyclerView removed, ~110 KB). 7z: LZMA SDK sources in src/main/cpp.

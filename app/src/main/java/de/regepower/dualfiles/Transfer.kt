@@ -66,16 +66,16 @@ internal object Transfer {
     }
 
     /** null if [f] does not exist. */
-    private fun isDirectory(ctx: Context, f: File): Boolean? =
+    fun isDirectory(ctx: Context, f: File): Boolean? =
         if (Saf.isSaf(f)) Saf.stat(ctx, f)?.isDir
         else if (f.exists()) f.isDirectory
         else null
 
-    private fun children(ctx: Context, f: File): List<File> =
+    fun children(ctx: Context, f: File): List<File> =
         if (Saf.isSaf(f)) Saf.list(ctx, f).map { File(f, it.name) }
         else f.listFiles().orEmpty().toList()
 
-    private fun createChild(ctx: Context, dir: File, name: String, isDir: Boolean): File? =
+    fun createChild(ctx: Context, dir: File, name: String, isDir: Boolean): File? =
         if (Saf.isSaf(dir)) Saf.createChild(ctx, dir, name, isDir)
         else {
             val t = FileOps.uniqueTarget(dir, name)
@@ -92,11 +92,11 @@ internal object Transfer {
         return true
     }
 
-    private fun openInput(ctx: Context, f: File): InputStream? =
+    fun openInput(ctx: Context, f: File): InputStream? =
         if (Saf.isSaf(f)) Saf.docUri(ctx, f)?.let { ctx.contentResolver.openInputStream(it) }
         else FileInputStream(f)
 
-    private fun openOutput(ctx: Context, f: File): OutputStream? =
+    fun openOutput(ctx: Context, f: File): OutputStream? =
         if (Saf.isSaf(f)) Saf.docUri(ctx, f)?.let { ctx.contentResolver.openOutputStream(it, "w") }
         else FileOutputStream(f)
 }

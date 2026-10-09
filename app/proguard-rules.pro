@@ -6,3 +6,6 @@
     public static int w(...);
     public static int e(...);
 }
+
+# JNI: the C side looks up SevenZip.extract by name
+-keepclasseswithmembernames class de.regepower.dualfiles.SevenZip { native <methods>; }
