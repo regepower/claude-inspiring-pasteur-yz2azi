@@ -1144,7 +1144,7 @@ class MainActivity : Activity() {
             val ext = if (isDir) "" else f.extension.lowercase().take(4)
             val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
             val appBitmap = if (isDir) null else assocCached(f.extension.lowercase())?.let { AppBadges.get(this@MainActivity, it.packageName) }
-            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, fill))
+            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, text))
             row.iconHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
             row.iconHit.setOnClickListener { toggle(p, f) }
 

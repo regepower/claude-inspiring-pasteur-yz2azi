@@ -189,18 +189,15 @@ internal class EntryIcon(
         if (!isFolder) {
             fillPaint.color = 0x38000000
             canvas.drawPath(FOLD, fillPaint)
-            if (label.isNotEmpty()) {
+            if (appBadge != null) {
+                // The set app's monochrome symbol replaces the extension text, in the text colour
+                badgePaint.colorFilter = PorterDuffColorFilter(appTint, PorterDuff.Mode.SRC_IN)
+                canvas.drawBitmap(appBadge, null, RectF(10f, 19f, 38f, 47f), badgePaint)
+            } else if (label.isNotEmpty()) {
                 textPaint.color = textColor
                 textPaint.textSize = IconText.sizeFor(label)
                 canvas.drawText(label, 24f, 36f + textPaint.textSize * 0.36f, textPaint)
             }
-        }
-        if (appBadge != null) {
-            // The app that opens this type: its silhouette on a white disc, bottom left
-            fillPaint.color = Color.WHITE
-            canvas.drawCircle(8f, 48f, 7.5f, fillPaint)
-            badgePaint.colorFilter = PorterDuffColorFilter(appTint, PorterDuff.Mode.SRC_IN)
-            canvas.drawBitmap(appBadge, null, RectF(3f, 43f, 13f, 53f), badgePaint)
         }
         if (selected) {
             val cx = 40f
