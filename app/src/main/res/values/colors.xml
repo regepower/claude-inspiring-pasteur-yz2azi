@@ -7,6 +7,8 @@
     <color name="md_on_container">#001B3E</color>
     <color name="md_surface">#FDFBFF</color>
     <color name="md_outline">#8F9099</color>
+    <color name="md_tertiary">#7D5260</color>
+    <color name="md_tertiary_container">#FFD8E4</color>
     <color name="md_error_container">#FFDAD6</color>
     <color name="md_on_error_container">#410002</color>
     <color name="ic_launcher_background">#1F5FBF</color>

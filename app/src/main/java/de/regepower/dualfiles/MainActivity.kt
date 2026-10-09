@@ -55,8 +55,8 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.util.Date
 import java.util.concurrent.Executors
 
-private const val SRC_COLOR = 0xFF1F5FBF.toInt()
-private const val DST_COLOR = 0xFFB45309.toInt()
+// Folder icons are yellow like in Windows; the two panes take the Material You primary and tertiary colours.
+private const val FOLDER_YELLOW = 0xFFFFC83D.toInt()
 private const val ERROR_COLOR = 0xFFB3261E.toInt()
 private const val REQ_TREE = 1
 private const val REQ_SAVE = 2
@@ -312,11 +312,11 @@ class MainActivity : Activity() {
         val primary = roots.firstOrNull() ?: Environment.getExternalStorageDirectory()
         val download = File(primary, "Download")
         panes = arrayOf(
-            Pane(SRC_COLOR, R.string.band_source, if (download.isDirectory) download else primary).also {
+            Pane(getColor(R.color.md_primary), R.string.band_source, if (download.isDirectory) download else primary).also {
                 it.treePage = 0
                 it.filePage = 1
             },
-            Pane(DST_COLOR, R.string.band_target, primary).also {
+            Pane(getColor(R.color.md_tertiary), R.string.band_target, primary).also {
                 it.treePage = 3
                 it.filePage = 2
             }
@@ -554,7 +554,7 @@ class MainActivity : Activity() {
     private fun setTab(active: Int) {
         for (i in tabs.indices) {
             val on = i == active
-            val color = if (i < 2) SRC_COLOR else DST_COLOR
+            val color = if (i < 2) getColor(R.color.md_primary) else getColor(R.color.md_tertiary)
             val bg = GradientDrawable()
             bg.cornerRadius = dp(8).toFloat()
             bg.setColor(if (on) color else getColor(R.color.md_container))
@@ -1108,7 +1108,7 @@ class MainActivity : Activity() {
                 if (!p.expanded.remove(n.file.path)) p.expanded.add(n.file.path)
                 loadPane(p)
             }
-            row.icon.setImageDrawable(EntryIcon("", true, p.color, Color.WHITE, false, p.color))
+            row.icon.setImageDrawable(EntryIcon("", true, FOLDER_YELLOW, Color.WHITE, false, p.color))
             row.label.text = n.label
             row.label.setTextColor(getColor(R.color.md_on_surface))
             row.label.typeface = if (current) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
@@ -1132,7 +1132,7 @@ class MainActivity : Activity() {
 
             // Icon: filled folder, or the file's extension on a colour from its hue; check badge when marked.
             val ext = if (isDir) "" else f.extension.lowercase().take(4)
-            val (fill, text) = if (isDir) Pair(p.color, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
+            val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
             row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color))
             row.iconHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
             row.iconHit.setOnClickListener { toggle(p, f) }
