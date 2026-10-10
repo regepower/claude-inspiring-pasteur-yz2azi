@@ -6,17 +6,15 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
 import android.text.format.Formatter
 import android.util.LruCache
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
-import android.widget.BaseAdapter
-import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import java.io.Closeable
 import java.io.File
 import java.io.FileInputStream
@@ -31,8 +29,8 @@ import java.nio.charset.CodingErrorAction
 /**
  * Read-only text and hex viewer. The file is read in 64 KB blocks only where it is shown, so large files
  * open at once. Text: lines are found in the background (a line longer than 4 KB continues in the next
- * row). Monospace; one finger scrolls up and down, two fingers move the lines sideways; both scroll bars
- * can be dragged.
+ * row). Monospace; one finger scrolls both ways, two fingers zoom, hold a word to mark and copy
+ * (text and hex). Both scroll bars can be dragged.
  */
 class ViewerActivity : Activity() {
     private lateinit var channel: FileChannel
@@ -49,14 +47,14 @@ class ViewerActivity : Activity() {
     @Volatile private var longestRow = 0
     @Volatile private var stop = false
 
-    private lateinit var list: PanList
-    private lateinit var rowsBox: LinearLayout
-    private var textBox: View? = null
+    private lateinit var grid: TextGrid
+    private lateinit var vBar: RangeBar
+    private lateinit var hBar: RangeBar
     private lateinit var info: TextView
     private lateinit var toggle: TextView
-    private val adapter = RowAdapter()
+    private lateinit var selBar: LinearLayout
     private val main = Handler(Looper.getMainLooper())
-    private var charWidth = 0f
+    private val prefs by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,7 +75,7 @@ class ViewerActivity : Activity() {
                 size = raf.length()
             }
         } catch (e: Exception) {
-            android.widget.Toast.makeText(this, R.string.view_error, android.widget.Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.view_error, Toast.LENGTH_SHORT).show()
             finish()
             return
         }
@@ -85,6 +83,12 @@ class ViewerActivity : Activity() {
         hex = head.any { it == 0.toByte() }
         charset = if (isUtf8(head)) Charsets.UTF_8 else Charsets.ISO_8859_1
         setContentView(build(name))
+        // Android 13+: back comes through the dispatcher; it first removes a mark
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT) {
+                if (grid.selecting) grid.clearSelection() else finish()
+            }
+        }
         Thread { index() }.start()
         show()
     }
@@ -97,6 +101,26 @@ class ViewerActivity : Activity() {
             // nothing left to do
         }
         super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+    override fun onBackPressed() {
+        // Back first removes a mark
+        if (::grid.isInitialized && grid.selecting) grid.clearSelection() else super.onBackPressed()
+    }
+
+    private fun chip(label: Int, onClick: () -> Unit) = TextView(this).apply {
+        setText(label)
+        textSize = 13f
+        typeface = Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        setPadding(dp(14), dp(8), dp(14), dp(8))
+        setTextColor(getColor(R.color.md_on_container))
+        background = android.graphics.drawable.GradientDrawable().apply {
+            cornerRadius = dp(8).toFloat()
+            setColor(getColor(R.color.md_container))
+        }
+        setOnClickListener { onClick() }
     }
 
     private fun build(name: String): View {
@@ -127,119 +151,83 @@ class ViewerActivity : Activity() {
         texts.addView(title)
         texts.addView(info)
         head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        toggle = TextView(this)
-        toggle.textSize = 13f
-        toggle.typeface = Typeface.DEFAULT_BOLD
-        toggle.gravity = Gravity.CENTER
-        toggle.setPadding(dp(14), dp(8), dp(14), dp(8))
-        toggle.setTextColor(getColor(R.color.md_on_container))
-        toggle.background = android.graphics.drawable.GradientDrawable().apply {
-            cornerRadius = dp(8).toFloat()
-            setColor(getColor(R.color.md_container))
-        }
-        toggle.setOnClickListener {
+        toggle = chip(R.string.view_hex) {
             hex = !hex
-            list.offset = 0
-            list.setSelection(0)
+            grid.reset()
             show()
         }
         head.addView(toggle)
         root.addView(head)
 
-        list = PanList(this)
-        list.adapter = adapter
-        list.divider = null
-        list.isFastScrollEnabled = true          // draggable vertical thumb
-        list.isFastScrollAlwaysVisible = true
-        list.setPadding(0, 0, dp(12), 0)
-        list.clipToPadding = false
-        val bar = RangeBar(this)
-        bar.onDrag = { list.shiftNames(it) }
-        list.onRange = { content, viewport, offset -> bar.update(content, viewport, offset) }
-        // Long press on a row (large files, hex): copies that row
-        list.setOnItemLongClickListener { _, _, pos, _ ->
-            copy(if (hex) hexRow(pos) else textRow(pos))
-            true
+        // Shown while something is marked
+        selBar = LinearLayout(this)
+        selBar.gravity = Gravity.CENTER_VERTICAL
+        selBar.setPadding(dp(12), 0, dp(8), dp(6))
+        val gap = { LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(dp(4), 0, dp(4), 0) } }
+        selBar.addView(chip(R.string.view_copy) { copySelection(false) }, gap())
+        selBar.addView(chip(R.string.share) { copySelection(true) }, gap())
+        selBar.addView(chip(R.string.view_select_all) { grid.selectAll() }, gap())
+        selBar.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        selBar.addView(chip(R.string.view_unmark) { grid.clearSelection() }, gap())
+        selBar.visibility = View.GONE
+        root.addView(selBar)
+
+        grid = TextGrid(this)
+        grid.setColors(getColor(R.color.md_on_surface), getColor(R.color.md_primary) and 0x50FFFFFF, getColor(R.color.md_primary))
+        grid.setTextSizeSp(prefs.getFloat("viewer_sp", 13f))
+        grid.onZoom = { prefs.edit().putFloat("viewer_sp", it).apply() }
+        grid.onSelection = { on -> selBar.visibility = if (on) View.VISIBLE else View.GONE }
+        grid.source = object : TextGrid.Source {
+            override fun count() = if (hex) hexRows() else rowCount
+            override fun row(i: Int) = if (hex) hexRow(i) else textRow(i)
+            override fun maxChars() = if (hex) hexWidth() else longestRow + 1
         }
-        rowsBox = LinearLayout(this)
-        rowsBox.orientation = LinearLayout.VERTICAL
-        rowsBox.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        rowsBox.addView(bar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
-        root.addView(rowsBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        if (size <= SELECT_LIMIT) {
-            textBox = buildSelectable()
-            root.addView(textBox, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        vBar = RangeBar(this)
+        vBar.vertical = true
+        hBar = RangeBar(this)
+        // The vertical bar works in rows (a hex view can have more pixels than an Int holds)
+        vBar.onDrag = { row -> grid.scrollToPos(grid.scrollXf, row.toDouble() * (grid.contentHeight() / maxOf(1, grid.source!!.count()))) }
+        hBar.onDrag = { x -> grid.scrollToPos(x.toDouble(), grid.scrollYf) }
+        grid.onRange = {
+            vBar.update(grid.source!!.count(), grid.rowsVisible(), grid.firstRow())
+            hBar.update(grid.contentWidth().toInt(), grid.width, grid.scrollXf.toInt())
         }
 
-        charWidth = android.graphics.Paint().apply {
-            typeface = Typeface.MONOSPACE
-            textSize = 13f * resources.displayMetrics.scaledDensity
-        }.measureText("0")
+        val row = LinearLayout(this)
+        row.addView(grid, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
+        row.addView(vBar, LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.MATCH_PARENT))
+        root.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(hBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
         return root
     }
 
     /** Refreshes counts, width and labels after a mode change or new index data. */
     private fun show() {
         toggle.setText(if (hex) R.string.view_text else R.string.view_hex)
-        val selectable = !hex && textBox != null
-        textBox?.visibility = if (selectable) View.VISIBLE else View.GONE
-        rowsBox.visibility = if (selectable) View.GONE else View.VISIBLE
-        val chars = if (hex) hexWidth() else longestRow + 1
-        list.contentWidth = chars * charWidth + dp(16)
         val sizeText = Formatter.formatFileSize(this, size)
         info.text = if (hex) getString(R.string.view_info_hex, sizeText)
         else getString(if (indexing) R.string.view_info_reading else R.string.view_info_text, sizeText, rowCount, charset.name())
-        adapter.notifyDataSetChanged()
-        list.requestLayout()
+        grid.refresh()
     }
 
-    /**
-     * Small text files as one selectable text: hold a word to mark it, drag the handles to extend,
-     * then copy or share (Android's own selection). Scrolls both ways; both bars can be dragged.
-     */
-    private fun buildSelectable(): View {
-        val text = TextView(this)
-        text.typeface = Typeface.MONOSPACE
-        text.textSize = 13f
-        text.setTextColor(getColor(R.color.md_on_surface))
-        text.setHorizontallyScrolling(true)
-        text.setPadding(dp(8), dp(4), dp(24), dp(24))
-        text.text = String(bytes(0, size.toInt()), charset)
-        text.setTextIsSelectable(true)
-        val h = android.widget.HorizontalScrollView(this)
-        h.isHorizontalScrollBarEnabled = false
-        h.addView(text, ViewGroup.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        val v = android.widget.ScrollView(this)
-        v.isVerticalScrollBarEnabled = false
-        v.addView(h, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        val vBar = RangeBar(this)
-        vBar.vertical = true
-        val hBar = RangeBar(this)
-        vBar.onDrag = { v.scrollTo(0, it) }
-        hBar.onDrag = { h.scrollTo(it, 0) }
-        val sync = {
-            vBar.update(h.height, v.height, v.scrollY)
-            hBar.update(text.width, h.width, h.scrollX)
+    /** Copies (or shares) the marked text; the toast shows what was copied. */
+    private fun copySelection(share: Boolean) {
+        val text = grid.selectedText(MAX_COPY)
+        if (text == null) {
+            Toast.makeText(this, getString(R.string.view_too_big, MAX_COPY / 1_000_000), Toast.LENGTH_LONG).show()
+            return
         }
-        v.setOnScrollChangeListener { _, _, _, _, _ -> sync() }
-        h.setOnScrollChangeListener { _, _, _, _, _ -> sync() }
-        v.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> sync() }
-
-        val row = LinearLayout(this)
-        row.addView(v, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-        row.addView(vBar, LinearLayout.LayoutParams(dp(14), ViewGroup.LayoutParams.MATCH_PARENT))
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.addView(row, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        box.addView(hBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
-        return box
-    }
-
-    private fun copy(s: String) {
+        if (share) {
+            val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain")
+                .putExtra(android.content.Intent.EXTRA_TEXT, text)
+            startActivity(android.content.Intent.createChooser(send, getString(R.string.share)))
+            return
+        }
         val cm = getSystemService(android.content.ClipboardManager::class.java)
-        cm.setPrimaryClip(android.content.ClipData.newPlainText(null, s))
-        android.widget.Toast.makeText(this, R.string.view_copied, android.widget.Toast.LENGTH_SHORT).show()
+        cm.setPrimaryClip(android.content.ClipData.newPlainText(null, text))
+        val preview = text.replace('\n', ' ').let { if (it.length > 40) it.take(40) + "…" else it }
+        Toast.makeText(this, getString(R.string.view_copied_what, preview, text.length), Toast.LENGTH_SHORT).show()
+        grid.clearSelection()
     }
 
     // ---- File access ----
@@ -400,43 +388,13 @@ class ViewerActivity : Activity() {
         return sb.toString()
     }
 
-    private class Row(ctx: android.content.Context) : FrameLayout(ctx), NameRow {
-        val text = TextView(ctx)
-        override val clip = WideClip(ctx)
-        override val content: View get() = text
-
-        init {
-            text.typeface = Typeface.MONOSPACE
-            text.textSize = 13f
-            text.maxLines = 1
-            text.setHorizontallyScrolling(true)
-            text.setPadding(ctx.dp(8), ctx.dp(1), ctx.dp(8), ctx.dp(1))
-            clip.addView(text, LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(clip, LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        }
-    }
-
-    private inner class RowAdapter : BaseAdapter() {
-        override fun getCount() = if (hex) hexRows() else rowCount
-        override fun getItem(position: Int): Any = position
-        override fun getItemId(position: Int) = position.toLong()
-
-        override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val row = convertView as? Row ?: Row(this@ViewerActivity).also {
-                it.text.setTextColor(getColor(R.color.md_on_surface))
-            }
-            row.text.text = if (hex) hexRow(position) else textRow(position)
-            list.applyTo(row)
-            return row
-        }
-    }
 
     companion object {
         const val EXTRA_PATH = "path"
         const val EXTRA_URI = "uri"
         const val EXTRA_NAME = "name"
         private const val BLOCK = 64 * 1024
-        private const val SELECT_LIMIT = 512 * 1024    // up to this size, text is one selectable view
+        private const val MAX_COPY = 2_000_000         // characters that can be copied at once
         private const val MAX_ROW = 4096               // bytes per text row before it continues
         private const val MAX_ROWS = 4_000_000         // 32 MB of row offsets at most
         private val HEX = "0123456789ABCDEF".toCharArray()

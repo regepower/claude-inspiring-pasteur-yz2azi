@@ -120,10 +120,14 @@
     <string name="op_moving">Verschiebe…</string>
     <string name="op_deleting">Lösche…</string>
     <string name="op_count">%1$d von %2$d Einträgen</string>
-    <string name="webp_convert">In WebP umwandeln zum Ziel</string>
+    <string name="webp_convert">In WebP konvertieren (hier, ersetzt das Bild)</string>
+    <string name="webp_copy">Als .webp ins Ziel kopieren</string>
     <string name="webp_title">%1$d Bilder in WebP</string>
     <string name="webp_lossy">Verlustbehaftet, Qualität %1$d</string>
     <string name="webp_lossless">Verlustfrei</string>
     <string name="webp_converting">Wandle um…</string>
-    <string name="view_copied">Kopiert</string>
+    <string name="view_copy">Kopieren</string>
+    <string name="view_select_all">Alles</string>
+    <string name="view_too_big">Zu viel markiert (mehr als %1$d Mio. Zeichen)</string>
+    <string name="view_copied_what">Kopiert: \"%1$s\" (%2$d Zeichen)</string>
 </resources>

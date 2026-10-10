@@ -299,9 +299,9 @@ internal object Archive {
     }
 
     /** Extracts one file of an archive to the cache, for opening it in another app. */
-    fun extractForView(ctx: Context, archive: File, inner: String): File? {
+    fun extractForView(ctx: Context, archive: File, inner: String, progress: ArcProgress): File? {
         val dir = File(ctx.cacheDir, "view").apply { deleteRecursively(); mkdirs() }
-        val r = extract(ctx, archive, listOf(inner), dir, null, emptyMap()) { _, _ -> true }
+        val r = extract(ctx, archive, listOf(inner), dir, null, emptyMap(), progress)
         return File(dir, inner.substringAfterLast('/')).takeIf { r.error == null && it.isFile }
     }
 

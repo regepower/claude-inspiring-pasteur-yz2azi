@@ -949,8 +949,10 @@ class MainActivity : Activity() {
         labels.add(getString(R.string.arc_zip))
         actions.add(8)
         if (selectedOr(file).any { Webp.canConvert(it) }) {
-            labels.add(getString(R.string.webp_convert))
+            labels.add(getString(R.string.webp_copy))
             actions.add(10)
+            labels.add(getString(R.string.webp_convert))
+            actions.add(11)
         }
         labels.add(getString(R.string.copy_to_target))
         actions.add(0)
@@ -969,7 +971,8 @@ class MainActivity : Activity() {
                     6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
                     7 -> askExtract(file, listOf(""))
                     9 -> viewFile(file)
-                    10 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) })
+                    10 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, false)
+                    11 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, true)
                     8 -> {
                         val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
                         if (Archive.inside(targetDir())) {
@@ -1131,13 +1134,13 @@ class MainActivity : Activity() {
         val i = Intent(this, ViewerActivity::class.java).putExtra(ViewerActivity.EXTRA_NAME, f.name)
         val arc = Archive.split(f)
         when {
-            arc != null && arc.second.isNotEmpty() -> Thread {
-                val copy = Archive.extractForView(this, arc.first, arc.second)
-                runOnUiThread {
-                    if (copy != null) startActivity(i.putExtra(ViewerActivity.EXTRA_PATH, copy.path))
-                    else Toast.makeText(this, R.string.arc_read, Toast.LENGTH_SHORT).show()
+            arc != null && arc.second.isNotEmpty() -> {
+                var copy: File? = null
+                runArchive(R.string.arc_extracting, quiet = true, then = { copy?.let { startActivity(i.putExtra(ViewerActivity.EXTRA_PATH, it.path)) } }) { pr ->
+                    copy = Archive.extractForView(this, arc.first, arc.second, pr)
+                    Archive.Result(if (copy == null) R.string.arc_read else null)
                 }
-            }.start()
+            }
             Saf.isSaf(f) -> Thread {
                 val uri = Saf.docUri(this, f)
                 runOnUiThread {
@@ -1152,13 +1155,11 @@ class MainActivity : Activity() {
     /** Tap on a file inside an archive: unpacked to the cache, then opened like any file. */
     private fun openFromArchive(f: File) {
         val (arc, inner) = Archive.split(f) ?: return
-        Thread {
-            val copy = Archive.extractForView(this, arc, inner)
-            runOnUiThread {
-                if (copy != null) openFile(copy)
-                else Toast.makeText(this, R.string.arc_read, Toast.LENGTH_SHORT).show()
-            }
-        }.start()
+        var copy: File? = null
+        runArchive(R.string.arc_extracting, quiet = true, then = { copy?.let { openFile(it) } }) { pr ->
+            copy = Archive.extractForView(this, arc, inner, pr)
+            Archive.Result(if (copy == null) R.string.arc_read else null)
+        }
     }
 
     /** The marked entries, or [file] alone when nothing is marked. */
@@ -1166,9 +1167,13 @@ class MainActivity : Activity() {
         panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
 
     /** Pictures to WebP in the target: quality first, then existing names, then the run with progress. */
-    private fun askWebp(pictures: List<File>) {
-        val dst = targetDir()
+    /**
+     * Pictures to WebP. [inPlace]: the WebP is made next to the picture and the picture is deleted once
+     * the WebP was written; otherwise a WebP copy goes to the target.
+     */
+    private fun askWebp(pictures: List<File>, inPlace: Boolean) {
         if (pictures.isEmpty()) return
+        val dst = if (inPlace) pictures[0].parentFile ?: return else targetDir()
         if (Archive.inside(dst)) {
             Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
             return
@@ -1185,7 +1190,9 @@ class MainActivity : Activity() {
                 resolveClashes(dst, pictures.map { Webp.targetName(it) }) { m ->
                     val run = pictures.filter { m[Webp.targetName(it)] != Clash.SKIP }
                     execute(R.string.webp_converting, run, true) { f, _ ->
-                        Webp.convert(this, f, dst, q, m[Webp.targetName(f)] == Clash.OVERWRITE)
+                        val ok = Webp.convert(this, f, dst, q, m[Webp.targetName(f)] == Clash.OVERWRITE)
+                        // The original goes only after its WebP is safely written
+                        ok && (!inPlace || Transfer.delete(this, f))
                     }
                 }
             }
@@ -1235,7 +1242,10 @@ class MainActivity : Activity() {
     }
 
     /** Runs a pack/unpack job off the UI thread with a dialog that can cancel it; errors are shown as text. */
-    private fun runArchive(message: Int, count: Boolean = false, job: (ArcProgress) -> Archive.Result) {
+    private fun runArchive(
+        message: Int, count: Boolean = false, quiet: Boolean = false, then: (() -> Unit)? = null,
+        job: (ArcProgress) -> Archive.Result,
+    ) {
         val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         bar.max = 1000
@@ -1271,6 +1281,14 @@ class MainActivity : Activity() {
             val r = job(progress)
             runOnUiThread {
                 if (dialog.isShowing) dialog.dismiss()
+                if (quiet) {
+                    // Only a preparation (e.g. unpacking one file to open it): no reload, no toast
+                    val e = r.error
+                    if (e == null) then?.invoke() else if (e != R.string.arc_cancelled) {
+                        AlertDialog.Builder(this).setMessage(e).setPositiveButton(R.string.help_ok, null).show()
+                    }
+                    return@runOnUiThread
+                }
                 for (p in panes) p.selected.clear()
                 counts.clear()
                 refreshAll()

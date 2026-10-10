@@ -127,10 +127,15 @@
     <string name="op_moving">Moving…</string>
     <string name="op_deleting">Deleting…</string>
     <string name="op_count">%1$d of %2$d entries</string>
-    <string name="webp_convert">Convert to WebP in target</string>
+    <string name="webp_convert">Convert to WebP (here, replaces the picture)</string>
+    <string name="webp_copy">Copy as .webp to target</string>
     <string name="webp_title">%1$d pictures to WebP</string>
     <string name="webp_lossy">Lossy, quality %1$d</string>
     <string name="webp_lossless">Lossless</string>
     <string name="webp_converting">Converting…</string>
-    <string name="view_copied">Copied</string>
+    <string name="view_copy">Copy</string>
+    <string name="view_select_all">All</string>
+    <string name="view_unmark" translatable="false">✕</string>
+    <string name="view_too_big">Too much marked (more than %1$d million characters)</string>
+    <string name="view_copied_what">Copied: \"%1$s\" (%2$d characters)</string>
 </resources>
