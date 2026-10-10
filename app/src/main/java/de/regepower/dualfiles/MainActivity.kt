@@ -827,9 +827,6 @@ class MainActivity : Activity() {
         }
     }
 
-        setOnClickListener { onClick() }
-    }
-
     /** Sort / filter symbols in the header show the state of the visible side (filter coloured when active). */
     private fun updateTools() {
         if (!::sortBtn.isInitialized) return
