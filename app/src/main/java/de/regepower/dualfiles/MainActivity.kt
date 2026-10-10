@@ -112,7 +112,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     lateinit var fileList: PanList
     var treePage = 0
     var filePage = 0
-    var gen = 0
+    @Volatile var gen = 0
     var raw: List<Entry> = emptyList()   // as read from disk
     var sortBy = SortBy.NAME
     var sortDesc = false
@@ -120,7 +120,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     var nameQuery = ""
     var inArchive = false                 // dir lies inside a ZIP/7z archive (read-only)
     lateinit var emptyView: TextView      // "folder is empty" over the list
-    lateinit var loading: View            // thin bar under the band while a folder is read
+    lateinit var loading: View            // spinner over the list while a folder is read
 }
 
 /** A list row whose name can be moved sideways; [clip] is the visible part of the name. */
@@ -369,7 +369,7 @@ class MainActivity : Activity() {
     private fun allRoots() = roots + Vfs.rootFiles(this)
     private fun rootName(r: File) = rootNames[r.path] ?: if (Vfs.isVirtual(r)) Vfs.name(this, r) else r.name
     private val rootNames = HashMap<String, String>()
-    private val loader = Executors.newSingleThreadExecutor()   // directory reads, off the UI thread
+    private val loaders = arrayOf(Executors.newSingleThreadExecutor(), Executors.newSingleThreadExecutor())   // folder reads, one per side
     private val counter = Executors.newSingleThreadExecutor()  // folder item counts
     private val counts = HashMap<String, Int>()                // UI thread only
     private val countsPending = HashSet<String>()              // UI thread only
@@ -815,12 +815,6 @@ class MainActivity : Activity() {
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
         page.addView(band(p))
-        // Thin bar while a folder is read (shown only when it takes a moment, e.g. network)
-        p.loading = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            isIndeterminate = true
-            visibility = View.INVISIBLE
-        }
-        page.addView(p.loading, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
         val list = PanList(this)
         styledList(list)
         p.fileList = list
@@ -876,6 +870,13 @@ class MainActivity : Activity() {
             visibility = View.GONE
         }
         stack.addView(p.emptyView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        // Spinner over the (dimmed) list while a folder is read; shown only when it takes a moment
+        p.loading = ProgressBar(this).apply {
+            isIndeterminate = true
+            indeterminateTintList = android.content.res.ColorStateList.valueOf(p.color)
+            visibility = View.GONE
+        }
+        stack.addView(p.loading, FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER))
         page.addView(stack, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         page.addView(rangeBar(list), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
         return page
@@ -1067,7 +1068,16 @@ class MainActivity : Activity() {
         }
         // Archives show up in the tree below their folder and open like folders
         else if (Vfs.isVirtual(f)) Vfs.list(this, f).filter { it.isDir && visible(it.name) }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
-        else f.listFiles { x -> visible(x.name) && (x.isDirectory || Archive.isArchive(x)) }.orEmpty().sortedBy { it.name.lowercase() }
+        else (if (NativeLib.ok) NativeLib.listDir(f.path, false) else null)?.let { fast ->
+            // Names and types only: no access per entry (each one is a round trip on shared storage)
+            @Suppress("UNCHECKED_CAST") val names = fast[0] as Array<String?>
+            val info = fast[1] as LongArray
+            names.indices.mapNotNull { i ->
+                val name = names[i] ?: return@mapNotNull null
+                val dir = info[i * 3 + 2] and 1L != 0L
+                if (visible(name) && (dir || Archive.isArchiveName(File(name)))) File(f, name) else null
+            }.sortedBy { it.name.lowercase() }
+        } ?: f.listFiles { x -> visible(x.name) && (x.isDirectory || Archive.isArchive(x)) }.orEmpty().sortedBy { it.name.lowercase() }
 
     /** Names starting with a dot are hidden unless the setting shows them. */
     private fun visible(name: String) = showHidden || !name.startsWith(".")
@@ -1105,7 +1115,7 @@ class MainActivity : Activity() {
         }
         if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
         // Native: names, sizes, dates and types in one call (about twice as fast for big folders)
-        val fast = if (NativeLib.ok) NativeLib.listDir(dir.path) else null
+        val fast = if (NativeLib.ok) NativeLib.listDir(dir.path, true) else null
         if (fast != null) {
             @Suppress("UNCHECKED_CAST") val names = fast[0] as Array<String?>
             val info = fast[1] as LongArray
@@ -1179,32 +1189,45 @@ class MainActivity : Activity() {
         val favs = favorites().sorted()
         p.inArchive = Archive.inside(dir)
         updateCrumbs(p)
-        // The loading bar only appears if reading takes longer than a blink
-        p.loading.postDelayed({ if (gen == p.gen && p.loading.tag != gen) p.loading.visibility = View.VISIBLE }, 300)
-        loader.execute {
-            val nodes = buildNodes(expanded, favs)
+        // The spinner appears if reading takes longer than a blink; the old list is dimmed meanwhile
+        p.loading.postDelayed({
+            if (gen == p.gen && p.loading.tag != gen) {
+                p.loading.visibility = View.VISIBLE
+                p.fileList.alpha = 0.4f
+            }
+        }, 120)
+        val roots = allRoots()
+        loaders[panes.indexOf(p)].execute {
+            if (gen != p.gen) return@execute   // a newer folder was opened meanwhile
             val virtual = Vfs.isVirtual(dir) || Archive.inside(dir)
-            val showUp = showUpRow && allRoots().none { it.path == dir.path } && (virtual && dir.parentFile != null || dir.parentFile?.canRead() == true)
+            val showUp = showUpRow && roots.none { it.path == dir.path } && (virtual && dir.parentFile != null || dir.parentFile?.canRead() == true)
             val entries = buildEntries(dir, showUp)
+            // The list first: the tree (one read per unfolded folder) follows
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
                 p.loading.tag = gen
-                p.loading.visibility = View.INVISIBLE
-                updateEmpty(p)
+                p.loading.visibility = View.GONE
+                p.fileList.alpha = 1f
                 Net.lastError?.let {
                     Net.lastError = null
                     Toast.makeText(this, getString(R.string.net_error, it), Toast.LENGTH_LONG).show()
                 }
-                p.nodes = nodes
                 p.raw = entries
                 p.entries = viewOf(p)
+                updateEmpty(p)
                 updateTools()
-                p.treeList.contentWidth = nodes.maxOfOrNull { it.width + dp(40) } ?: 0f
                 p.fileList.contentWidth = entries.maxOfOrNull { it.width } ?: 0f
-                p.treeAdapter.notifyDataSetChanged()
                 p.fileAdapter.notifyDataSetChanged()
-                p.treeList.requestLayout()
                 p.fileList.requestLayout()
+            }
+            if (gen != p.gen) return@execute
+            val nodes = buildNodes(expanded, favs)
+            runOnUiThread {
+                if (gen != p.gen || isFinishing) return@runOnUiThread
+                p.nodes = nodes
+                p.treeList.contentWidth = nodes.maxOfOrNull { it.width + dp(40) } ?: 0f
+                p.treeAdapter.notifyDataSetChanged()
+                p.treeList.requestLayout()
             }
         }
     }

@@ -25,8 +25,11 @@ internal object NativeLib {
         false
     }
 
-    /** { String[] names, long[] info } with size, modified ms and flags (1 folder, 2 read) per entry; null on error. */
-    @JvmStatic external fun listDir(path: String): Array<Any>?
+    /**
+     * { String[] names, long[] info } with size, modified ms and flags (1 folder, 2 read) per entry; null on
+     * error. Without [withStat] only names and types (much faster: nothing is read per entry).
+     */
+    @JvmStatic external fun listDir(path: String, withStat: Boolean): Array<Any>?
 
     /** EXIF (TIFF block) of a JPEG with the orientation set to normal, or null. */
     @JvmStatic external fun jpegExif(path: String): ByteArray?
