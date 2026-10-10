@@ -325,6 +325,7 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Report.install(this)
         val sm = getSystemService(StorageManager::class.java)
         val vols = sm.storageVolumes.filter { it.directory != null && it.state == Environment.MEDIA_MOUNTED }
         roots = vols.mapNotNull { it.directory }
@@ -1405,6 +1406,7 @@ class MainActivity : Activity() {
             getString(R.string.cfg_load),
             getString(if (showHidden) R.string.hidden_hide else R.string.hidden_show),
             getString(if (showThumbs) R.string.thumbs_off else R.string.thumbs_on),
+            getString(R.string.report_title),
         )
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
@@ -1440,6 +1442,10 @@ class MainActivity : Activity() {
                         if (!showThumbs) Thumbs.clear()
                         for (p in panes) p.fileAdapter.notifyDataSetChanged()
                     }
+                    7 -> Thread {
+                        val f = Report.build(this)
+                        runOnUiThread { viewFile(f) }
+                    }.start()
                 }
             }
             .setNegativeButton(R.string.cancel, null)
