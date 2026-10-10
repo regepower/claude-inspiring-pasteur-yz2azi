@@ -4,16 +4,23 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#E8A317"
-        android:pathData="M22,31q0,-3 3,-3h19.6l7.49,9.36h27.91q3,0 3,3v36.64q0,3 -3,3h-58q-3,0 -3,-3z" />
-    <path
-        android:fillColor="#FFC83D"
-        android:pathData="M25,37.36h58q3,0 3,3v36.64q0,3 -3,3h-58q-3,0 -3,-3v-36.64q0,-3 3,-3z" />
-    <path
-        android:pathData="M36,50H70M64,43L72,50L64,57M72,66H38M44,59L36,66L44,73"
-        android:strokeWidth="6"
-        android:strokeColor="#FFFFFF"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round" />
+    <!-- Scaled to 70 % around the centre: the motif (45 x 36) stays inside the 66 dp safe circle. -->
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:scaleX="0.7"
+        android:scaleY="0.7">
+        <path
+            android:fillColor="#E8A317"
+            android:pathData="M22,31q0,-3 3,-3h19.6l7.49,9.36h27.91q3,0 3,3v36.64q0,3 -3,3h-58q-3,0 -3,-3z" />
+        <path
+            android:fillColor="#FFC83D"
+            android:pathData="M25,37.36h58q3,0 3,3v36.64q0,3 -3,3h-58q-3,0 -3,-3v-36.64q0,-3 3,-3z" />
+        <path
+            android:pathData="M36,50H70M64,43L72,50L64,57M72,66H38M44,59L36,66L44,73"
+            android:strokeWidth="6"
+            android:strokeColor="#FFFFFF"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+    </group>
 </vector>
