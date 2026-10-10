@@ -9,3 +9,6 @@
 
 # JNI: the C side looks up SevenZip.extract by name
 -keepclasseswithmembernames class de.regepower.dualfiles.SevenZip { native <methods>; }
+
+# Called from C by name (SevenZip.extract reports progress through it)
+-keep interface de.regepower.dualfiles.ArcProgress { *; }

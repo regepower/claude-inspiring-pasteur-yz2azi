@@ -35,7 +35,7 @@
     </string-array>
     <string-array name="help_bodies">
         <item>Nach links und rechts wischen (oder die Tabs antippen): Ordnerbaum der Quelle, Dateien der Quelle, Dateien des Ziels, Ordnerbaum des Ziels. Kopieren, Verschieben und Löschen gehen immer von der markierten Seite zur anderen Seite.</item>
-        <item>Zeile antippen = öffnen: ein Ordner öffnet sich in der Liste, eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben. Markiert wird durch Antippen des Symbols links, dann erscheint ein Haken darauf.</item>
+        <item>Zeile antippen = öffnen: ein Ordner öffnet sich in der Liste, eine Datei in der Standard-App. Das Symbol einer Datei ist das Symbol der App, die sie öffnet. \"..\" geht einen Ordner nach oben. Ein ZIP- oder 7z-Archiv öffnet sich wie ein Ordner (nur lesen): Einträge markieren und kopieren oder halten, dann wird nur das entpackt, in einen neuen Ordner oder direkt ins Ziel, mit Fortschritt. Markiert wird durch Antippen des Symbols links, dann erscheint ein Haken darauf.</item>
         <item>Zeile halten: Menü mit \"Öffnen mit\", Teilen, Drucken, Umbenennen, ZIP/7z entpacken, als ZIP packen, Kopieren, Verschieben, Löschen (zur anderen Seite). Bei markierten Einträgen gibt es unten auch Schaltflächen. Mit zwei Fingern seitlich ziehen: alle langen Namen scrollen, Symbole und Häkchen bleiben stehen. Ein Finger wischt weiter die Seiten.</item>
         <item>Pfeil antippen klappt einen Ordner auf. Namen antippen wählt ihn aus: seine Dateien erscheinen auf der nächsten Seite. Chip ⋮ über der Liste: neuer Ordner, Ordner zu Favoriten oder entfernen (Favoriten stehen oben im Baum mit ★). Sortieren und Filtern: die zwei Chips über der Liste.</item>
         <item>Die App braucht \"Zugriff auf alle Dateien\". Beim ersten Start öffnet sich die Systemeinstellung. Nichts verlässt dein Handy.</item>
@@ -100,4 +100,8 @@
     <string name="arc_damaged">Das Archiv ist beschädigt oder kein gültiges Archiv.</string>
     <string name="arc_bad_path">Das Archiv enthält unsichere Pfade und wurde nicht entpackt.</string>
     <string name="arc_cancelled">Abgebrochen.</string>
+    <string name="arc_readonly">Archive sind hier nur lesbar: nur Entpacken geht.</string>
+    <string name="arc_into_folder">In Ordner \"%1$s\" im Ziel</string>
+    <string name="arc_into_target">Direkt ins Ziel</string>
+    <string name="arc_progress">%1$s von %2$s</string>
 </resources>

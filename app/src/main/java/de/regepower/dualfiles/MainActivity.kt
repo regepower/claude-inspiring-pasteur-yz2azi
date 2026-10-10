@@ -18,7 +18,6 @@ import android.net.Uri
 import android.app.PendingIntent
 import android.os.Build
 import android.os.Bundle
-import android.os.CancellationSignal
 import android.os.Environment
 import android.os.SystemClock
 import android.os.storage.StorageManager
@@ -46,6 +45,7 @@ import android.widget.ImageButton
 import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -114,6 +114,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     var sortDesc = false
     var filter = Filter.ALL
     var nameQuery = ""
+    var inArchive = false                 // dir lies inside a ZIP/7z archive (read-only)
     lateinit var sortChip: TextView
     lateinit var filterChip: TextView
 }
@@ -529,7 +530,11 @@ class MainActivity : Activity() {
         // One tap opens (folder, or file in its default app); marking is only done with the icon.
         list.setOnItemClickListener { _, _, pos, _ ->
             val e = p.entries[pos]
-            if (e.up || e.isDir) open(p, e.file) else openFile(e.file)
+            when {
+                e.up || e.isDir || Archive.isArchive(e.file) -> open(p, e.file)
+                p.inArchive -> openFromArchive(e.file)
+                else -> openFile(e.file)
+            }
         }
         // Long press: menu for the held entry (it gets marked, so copy/move/delete apply to it).
         list.setOnItemLongClickListener { _, _, pos, _ ->
@@ -609,7 +614,7 @@ class MainActivity : Activity() {
     }
 
     private fun open(p: Pane, dir: File) {
-        if (!dir.canRead()) return
+        if (!Saf.isSaf(dir) && !Archive.inside(dir) && !dir.canRead()) return
         p.dir = dir
         p.selected.clear()
         expandTo(p, dir)
@@ -719,8 +724,12 @@ class MainActivity : Activity() {
     }
 
     private fun subDirs(f: File): List<File> =
-        if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir && visible(it.name) }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
-        else f.listFiles { x -> x.isDirectory && visible(x.name) }.orEmpty().sortedBy { it.name.lowercase() }
+        if (Archive.inside(f)) Archive.split(f)!!.let { (arc, inner) ->
+            Archive.children(arc, inner).filter { it.isDir }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
+        }
+        // Archives show up in the tree below their folder and open like folders
+        else if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir && visible(it.name) }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
+        else f.listFiles { x -> visible(x.name) && (x.isDirectory || Archive.isArchive(x)) }.orEmpty().sortedBy { it.name.lowercase() }
 
     /** Names starting with a dot are hidden unless the setting shows them. */
     private fun visible(name: String) = showHidden || !name.startsWith(".")
@@ -741,6 +750,12 @@ class MainActivity : Activity() {
                 e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
             }
             return e
+        }
+        Archive.split(dir)?.let { (arc, inner) ->
+            if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
+            val items = Archive.children(arc, inner).filter { visible(it.name) }.map { finish(Entry(File(dir, it.name), false, it.isDir, it.size, it.modified)) }
+            out.addAll(items.sortedWith(compareBy({ !it.isDir }, { it.key })))
+            return out
         }
         if (Saf.isSaf(dir)) {
             if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
@@ -803,10 +818,12 @@ class MainActivity : Activity() {
         val dir = p.dir
         val expanded = HashSet(p.expanded)
         val favs = favorites().sorted()
+        p.inArchive = Archive.inside(dir)
         updateCrumbs(p)
         loader.execute {
             val nodes = buildNodes(expanded, favs)
-            val showUp = allRoots().none { it.path == dir.path } && dir.parentFile?.canRead() == true
+            val virtual = Saf.isSaf(dir) || Archive.inside(dir)
+            val showUp = allRoots().none { it.path == dir.path } && (virtual && dir.parentFile != null || dir.parentFile?.canRead() == true)
             val entries = buildEntries(dir, showUp)
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
@@ -850,7 +867,13 @@ class MainActivity : Activity() {
         counts[path]?.let { return it }
         if (countsPending.add(path)) {
             counter.execute {
-                val n = if (Saf.isSaf(File(path))) Saf.list(this, File(path)).size else File(path).list()?.size ?: 0
+                val f = File(path)
+                val arc = Archive.split(f)
+                val n = when {
+                    arc != null -> Archive.children(arc.first, arc.second).size
+                    Saf.isSaf(f) -> Saf.list(this, f).size
+                    else -> f.list()?.size ?: 0
+                }
                 runOnUiThread {
                     countsPending.remove(path)
                     if (!isFinishing) {
@@ -867,6 +890,13 @@ class MainActivity : Activity() {
 
     /** Menu for the held [file]: "Open with" (files only), then copy / move / delete for the marked items. */
     private fun showMenu(file: File, isDir: Boolean) {
+        if (Archive.inside(file.parentFile ?: file) && !Archive.isArchive(file)) {
+            // Inside an archive: read-only, the marked entries can only be unpacked
+            AlertDialog.Builder(this)
+                .setItems(arrayOf(getString(R.string.arc_extract))) { _, _ -> act(0) }
+                .show()
+            return
+        }
         val labels = ArrayList<String>()
         val actions = ArrayList<Int>()
         val mime = FileOps.mime(file)
@@ -882,7 +912,7 @@ class MainActivity : Activity() {
         }
         labels.add(getString(R.string.rename))
         actions.add(6)
-        if (!isDir && Archive.canExtract(file)) {
+        if (!isDir && Archive.isArchiveName(file)) {
             labels.add(getString(R.string.arc_extract))
             actions.add(7)
         }
@@ -903,12 +933,17 @@ class MainActivity : Activity() {
                     4 -> shareSelected()
                     5 -> FilePrint.print(this, uriFor(file), file.name, mime ?: "*/*")
                     6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
-                    7 -> runArchive(R.string.arc_extracting) { c -> Archive.extract(this, file, targetDir(), c) }
+                    7 -> askExtract(file, listOf(""))
                     8 -> {
                         val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
+                        if (Archive.inside(targetDir())) {
+                            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+                            return@setItems
+                        }
                         val base = if (items.size == 1) items[0].nameWithoutExtension.ifEmpty { items[0].name } else getString(R.string.arc_default)
                         askName(R.string.arc_zip, "$base.zip") { name ->
-                            runArchive(R.string.arc_packing) { c -> Archive.zip(this, items, targetDir(), name, c) }
+                            val dst = targetDir()
+                            runArchive(R.string.arc_packing) { pr -> Archive.zip(this, items, dst, name, pr) }
                         }
                     }
                     else -> act(actions[which])
@@ -922,6 +957,15 @@ class MainActivity : Activity() {
         val src = panes.firstOrNull { it.selected.isNotEmpty() } ?: return
         val dstDir = (if (src === panes[0]) panes[1] else panes[0]).dir
         val items = src.selected.toList()
+        Archive.split(src.dir)?.let { (arc, inner) ->
+            if (which == 0) askExtract(arc, items.map { if (inner.isEmpty()) it.name else "$inner/${it.name}" })
+            else Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (dstDir.let { Archive.inside(it) }) {
+            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+            return
+        }
         when (which) {
             0 -> execute(items) { Transfer.copy(this, it, dstDir) }
             1 -> execute(items) { Transfer.move(this, it, dstDir) }
@@ -950,6 +994,10 @@ class MainActivity : Activity() {
     /** Menu of the pane's folder (chip ⋮): new folder, favourite on/off. */
     private fun showFolderMenu(p: Pane) {
         val dir = p.dir
+        if (p.inArchive) {
+            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+            return
+        }
         val isFav = favorites().contains(dir.path)
         val items = arrayOf(getString(R.string.new_folder), getString(if (isFav) R.string.fav_remove else R.string.fav_add))
         AlertDialog.Builder(this)
@@ -989,6 +1037,37 @@ class MainActivity : Activity() {
         input.requestFocus()
     }
 
+    /** Unpack [selected] inner paths of [archive] ("" = all) to the target side: into a new folder or directly. */
+    private fun askExtract(archive: File, selected: List<String>) {
+        val dst = targetDir()
+        if (Archive.inside(dst)) {
+            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val name = archive.nameWithoutExtension.ifEmpty { "archive" }
+        val items = arrayOf(getString(R.string.arc_into_folder, name), getString(R.string.arc_into_target))
+        AlertDialog.Builder(this)
+            .setTitle(R.string.arc_extract)
+            .setItems(items) { _, which ->
+                val folder = if (which == 0) name else null
+                runArchive(R.string.arc_extracting) { pr -> Archive.extract(this, archive, selected, dst, folder, pr) }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Tap on a file inside an archive: unpacked to the cache, then opened like any file. */
+    private fun openFromArchive(f: File) {
+        val (arc, inner) = Archive.split(f) ?: return
+        Thread {
+            val copy = Archive.extractForView(this, arc, inner)
+            runOnUiThread {
+                if (copy != null) openFile(copy)
+                else Toast.makeText(this, R.string.arc_read, Toast.LENGTH_SHORT).show()
+            }
+        }.start()
+    }
+
     /** Folder of the pane without a selection (the other side). */
     private fun targetDir(): File {
         val src = panes.firstOrNull { it.selected.isNotEmpty() } ?: panes[0]
@@ -996,15 +1075,40 @@ class MainActivity : Activity() {
     }
 
     /** Runs a pack/unpack job off the UI thread with a dialog that can cancel it; errors are shown as text. */
-    private fun runArchive(message: Int, job: (CancellationSignal) -> Archive.Result) {
-        val cancel = CancellationSignal()
+    private fun runArchive(message: Int, job: (ArcProgress) -> Archive.Result) {
+        val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
+        val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        bar.max = 1000
+        bar.isIndeterminate = true
+        val text = TextView(this)
+        text.textSize = 13f
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(24), dp(8), dp(24), 0)
+        box.addView(bar)
+        box.addView(text)
         val dialog = AlertDialog.Builder(this)
-            .setMessage(message)
+            .setTitle(message)
+            .setView(box)
             .setCancelable(false)
-            .setNegativeButton(R.string.cancel) { _, _ -> cancel.cancel() }
+            .setNegativeButton(R.string.cancel) { _, _ -> cancelled.set(true) }
             .show()
+        var shown = 0L
+        val progress = ArcProgress { done, total ->
+            // At most ~10 updates per second reach the UI
+            val now = SystemClock.uptimeMillis()
+            if (now - shown > 100 || done == total) {
+                shown = now
+                runOnUiThread {
+                    bar.isIndeterminate = total <= 0
+                    if (total > 0) bar.progress = (done * 1000 / total).toInt()
+                    text.text = getString(R.string.arc_progress, Formatter.formatShortFileSize(this, done), Formatter.formatShortFileSize(this, total))
+                }
+            }
+            !cancelled.get()
+        }
         Thread {
-            val r = job(cancel)
+            val r = job(progress)
             runOnUiThread {
                 if (dialog.isShowing) dialog.dismiss()
                 for (p in panes) p.selected.clear()
@@ -1302,7 +1406,14 @@ class MainActivity : Activity() {
                     loadPane(p)
                 }
             }
-            row.icon.setImageDrawable(EntryIcon("", true, FOLDER_YELLOW, Color.WHITE, false, p.color))
+            // Archives in the tree keep their file icon; they unfold like folders
+            if (Archive.isArchiveName(n.file) && !n.fav) {
+                val ext = n.file.extension.lowercase()
+                val (fill, text) = VividColors.colorsFor(ext)
+                row.icon.setImageDrawable(EntryIcon(ext.uppercase(), false, fill, text, false, p.color))
+            } else {
+                row.icon.setImageDrawable(EntryIcon("", true, FOLDER_YELLOW, Color.WHITE, false, p.color))
+            }
             row.label.text = n.label
             row.label.setTextColor(getColor(R.color.md_on_surface))
             row.label.typeface = if (current) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
@@ -1329,7 +1440,7 @@ class MainActivity : Activity() {
             val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
             val appBitmap = if (isDir) null else assocCached(f.extension.lowercase())?.let { AppBadges.get(this@MainActivity, it.packageName) }
             // Preview of images and videos (setting), made in the background; the rows redraw when it is ready
-            val thumb = if (!isDir && showThumbs && Thumbs.canPreview(f)) {
+            val thumb = if (!isDir && showThumbs && !p.inArchive && Thumbs.canPreview(f)) {
                 Thumbs.get(this@MainActivity, f, e.modified) { for (q in panes) q.fileAdapter.notifyDataSetChanged() }
             } else null
             row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, text, thumb))

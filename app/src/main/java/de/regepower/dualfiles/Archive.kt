@@ -1,37 +1,168 @@
 package de.regepower.dualfiles
 
 import android.content.Context
-import android.os.CancellationSignal
 import java.io.File
 import java.io.IOException
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.charset.Charset
 import java.util.zip.ZipEntry
 import java.util.zip.ZipException
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
-/** 7z extraction in C (LZMA SDK, see src/main/cpp). */
+/** Progress of a pack/unpack run; returning false cancels it. Called from the worker thread (and from C). */
+fun interface ArcProgress {
+    fun step(done: Long, total: Long): Boolean
+}
+
+/** 7z reading in C (7z decoder of the LZMA SDK, see src/main/cpp). */
 internal object SevenZip {
     init {
         System.loadLibrary("sevenz")
     }
 
-    /** Extracts [archive] into the existing folder [outDir]: number of entries, or a negative error code. */
-    @JvmStatic external fun extract(archive: String, outDir: String, cancel: CancellationSignal?): Int
+    /** One "D|F \t size \t mtime \t name" string per entry, or a single "!code" on failure. */
+    @JvmStatic external fun list(archive: String): Array<String?>
+
+    /** Writes every entry whose [outNames] element is set to [outDir]/name: number of entries, or -code. */
+    @JvmStatic external fun extract(archive: String, outDir: String, outNames: Array<String?>, progress: ArcProgress): Int
 }
 
 /**
- * Unpacking ZIP and 7z, packing ZIP. Works for local and Saf folders: Saf archives are read from a copy in
- * the cache, and results for a Saf folder are made in the cache and then copied there.
+ * ZIP and 7z archives as read-only folders: a path below an archive file ("/x/a.zip/docs/b.txt") is a
+ * virtual path into it, like the "/saf/" paths. Unpacking all or a selection, packing ZIP.
+ * Archives in Saf folders are not opened as folders, but can be unpacked as a whole (via a cache copy).
  */
 internal object Archive {
     /** Error text resource for a failed run; null means success. */
     class Result(val error: Int?)
 
-    fun canExtract(f: File) = f.extension.lowercase() in setOf("zip", "7z")
+    /** One entry; [index] is its position in the archive, -1 for a folder that only exists implicitly. */
+    class Item(val index: Int, val path: String, val isDir: Boolean, val size: Long, val modified: Long) {
+        val name: String get() = path.substringAfterLast('/')
+    }
 
-    /** Unpacks [archive] into a new folder (named like the archive) in [dstDir]. */
-    fun extract(ctx: Context, archive: File, dstDir: File, cancel: CancellationSignal): Result {
+    private class Listing(val stamp: Long, val count: Int, val items: List<Item>, val error: Int?)
+
+    private val EXTS = setOf("zip", "7z")
+    private val cache = HashMap<String, Listing>()   // archive path -> contents; guarded by itself
+
+    fun isArchiveName(f: File) = f.extension.lowercase() in EXTS
+
+    /** A local archive file that can be opened like a folder. */
+    fun isArchive(f: File) = !Saf.isSaf(f) && isArchiveName(f) && f.isFile
+
+    /** For a path inside an archive (or the archive itself): the archive file and the inner path ("" = top). */
+    fun split(f: File): Pair<File, String>? {
+        if (Saf.isSaf(f)) return null
+        var cur: File? = f
+        while (cur != null) {
+            if (isArchiveName(cur) && cur.isFile) {
+                val inner = f.path.removePrefix(cur.path).trimStart('/')
+                return Pair(cur, inner)
+            }
+            // A real folder above: nothing virtual here
+            if (cur.isDirectory) return null
+            cur = cur.parentFile
+        }
+        return null
+    }
+
+    fun inside(f: File) = split(f) != null
+
+    /** Entries directly in [inner] of [archive] (folders implied by deeper paths included). */
+    fun children(archive: File, inner: String): List<Item> {
+        val all = listing(archive).items
+        val prefix = if (inner.isEmpty()) "" else "$inner/"
+        return all.filter { it.path.startsWith(prefix) && it.path.length > prefix.length && it.path.indexOf('/', prefix.length) < 0 }
+    }
+
+    /** Error of reading [archive], or null. */
+    fun error(archive: File): Int? = listing(archive).error
+
+    private fun listing(archive: File): Listing {
+        val stamp = archive.lastModified() xor archive.length()
+        synchronized(cache) { cache[archive.path]?.takeIf { it.stamp == stamp }?.let { return it } }
+        val l = try {
+            if (archive.extension.lowercase() == "7z") list7z(archive, stamp) else listZip(archive, stamp)
+        } catch (e: Exception) {
+            Listing(stamp, 0, emptyList(), R.string.arc_damaged)
+        }
+        synchronized(cache) { cache[archive.path] = l }
+        return l
+    }
+
+    private fun list7z(archive: File, stamp: Long): Listing {
+        val rows = try {
+            SevenZip.list(archive.path)
+        } catch (e: UnsatisfiedLinkError) {
+            return Listing(stamp, 0, emptyList(), R.string.arc_unsupported)
+        }
+        rows.firstOrNull()?.takeIf { it.startsWith("!") }?.let {
+            return Listing(stamp, 0, emptyList(), errorText(-(it.drop(1).toIntOrNull() ?: 1)))
+        }
+        val items = rows.mapIndexedNotNull { i, row ->
+            val parts = row?.split('\t', limit = 4)?.takeIf { it.size == 4 } ?: return@mapIndexedNotNull null
+            val path = clean(parts[3]) ?: return@mapIndexedNotNull null
+            Item(i, path, parts[0] == "D", parts[1].toLongOrNull() ?: 0, parts[2].toLongOrNull() ?: 0)
+        }
+        return Listing(stamp, rows.size, withFolders(items), null)
+    }
+
+    private fun listZip(archive: File, stamp: Long): Listing {
+        val entries = openZip(archive).use { z -> z.entries().toList() }
+        val items = entries.mapIndexedNotNull { i, e ->
+            val path = clean(e.name) ?: return@mapIndexedNotNull null
+            Item(i, path, e.isDirectory, if (e.isDirectory) 0 else maxOf(e.size, 0), maxOf(e.time, 0))
+        }
+        return Listing(stamp, entries.size, withFolders(items), null)
+    }
+
+    /** ZIP with UTF-8 names; older Windows archives (CP437 names) on a second try. */
+    private fun openZip(archive: File, cs: Charset = Charsets.UTF_8): ZipFile = try {
+        ZipFile(archive, cs).also { z -> z.entries().toList() }   // name decoding fails here, not later
+    } catch (e: IllegalArgumentException) {
+        if (cs == Charsets.UTF_8) openZip(archive, Charset.forName("IBM437")) else throw e
+    }
+
+    /** Normalised inner path: "/" separators, no empty, "." or ".." parts (unsafe entries are hidden). */
+    private fun clean(name: String): String? {
+        val parts = name.replace('\\', '/').split('/').filter { it.isNotEmpty() && it != "." }
+        if (parts.isEmpty() || parts.contains("..")) return null
+        return parts.joinToString("/")
+    }
+
+    /** Adds folders that only exist as part of deeper paths. */
+    private fun withFolders(items: List<Item>): List<Item> {
+        val known = items.filter { it.isDir }.map { it.path }.toHashSet()
+        val extra = ArrayList<Item>()
+        for (it in items) {
+            var p = it.path.substringBeforeLast('/', "")
+            while (p.isNotEmpty() && known.add(p)) {
+                extra.add(Item(-1, p, true, 0, 0))
+                p = p.substringBeforeLast('/', "")
+            }
+        }
+        return items + extra
+    }
+
+    fun errorText(code: Int): Int = when (code) {
+        -2 -> R.string.arc_memory          // SZ_ERROR_MEM
+        -4 -> R.string.arc_unsupported     // encrypted or unknown method
+        -9 -> R.string.arc_write           // SZ_ERROR_WRITE
+        -100 -> R.string.arc_bad_path
+        -101 -> R.string.arc_cancelled
+        -102 -> R.string.arc_read
+        else -> R.string.arc_damaged       // data, CRC, not an archive, ...
+    }
+
+    /**
+     * Unpacks the [selected] inner paths ("" = everything) of [archive] into [dstDir]: each selected entry
+     * lands there with its own name (top-level names made unique), inside a new folder [folder] if given.
+     * [archive] may lie in a Saf folder (whole archive only), [dstDir] may be a Saf folder.
+     */
+    fun extract(ctx: Context, archive: File, selected: List<String>, dstDir: File, folder: String?, progress: ArcProgress): Result {
         val work = File(ctx.cacheDir, "archive").apply { deleteRecursively(); mkdirs() }
         try {
             val local = if (Saf.isSaf(archive)) {
@@ -40,15 +171,41 @@ internal object Archive {
                 input.use { i -> copy.outputStream().use { i.copyTo(it) } }
                 copy
             } else archive
-            val name = archive.nameWithoutExtension.ifEmpty { "archive" }
-            val out = if (Saf.isSaf(dstDir)) File(File(work, "out"), name) else FileOps.uniqueTarget(dstDir, name)
-            if (!out.mkdirs()) return Result(R.string.arc_write)
-            val error = if (archive.extension.lowercase() == "7z") sevenZip(local, out, cancel) else unzip(local, out, cancel)
+            val l = listing(local)
+            if (Saf.isSaf(archive)) synchronized(cache) { cache.remove(local.path) }
+            l.error?.let { return Result(it) }
+
+            // Output name for every wanted entry, relative to the output folder
+            val toSaf = Saf.isSaf(dstDir)
+            val out = if (toSaf) File(work, "out").apply { mkdirs() } else dstDir
+            val tops = HashMap<String, String>()   // top-level name -> unique name in out
+            val names = arrayOfNulls<String>(l.count)
+            for (item in l.items) {
+                if (item.index < 0) continue
+                val sel = selected.firstOrNull { it.isEmpty() || item.path == it || item.path.startsWith("$it/") } ?: continue
+                val cut = if (sel.isEmpty()) 0 else sel.lastIndexOf('/') + 1
+                var rel = item.path.substring(cut)
+                if (folder != null) rel = "$folder/$rel"
+                val top = rel.substringBefore('/')
+                val unique = tops.getOrPut(top) { if (toSaf) top else FileOps.uniqueTarget(out, top).name }
+                names[item.index] = unique + rel.substring(top.length)
+            }
+            if (names.all { it == null }) return Result(null)
+
+            val error = if (local.extension.lowercase() == "7z") {
+                val r = try {
+                    SevenZip.extract(local.path, out.path, names, progress)
+                } catch (e: UnsatisfiedLinkError) {
+                    -4
+                }
+                if (r < 0) errorText(r) else null
+            } else unzip(local, out, names, progress)
             if (error != null) {
-                out.deleteRecursively()
+                // Remove what was started, so no half-unpacked folders stay behind
+                for (t in tops.values) File(out, t).deleteRecursively()
                 return Result(error)
             }
-            if (Saf.isSaf(dstDir) && !Transfer.copy(ctx, out, dstDir)) return Result(R.string.arc_write)
+            if (toSaf) for (t in tops.values) if (!Transfer.copy(ctx, File(out, t), dstDir)) return Result(R.string.arc_write)
             return Result(null)
         } catch (e: IOException) {
             return Result(R.string.arc_read)
@@ -57,93 +214,116 @@ internal object Archive {
         }
     }
 
-    private fun sevenZip(archive: File, out: File, cancel: CancellationSignal): Int? {
-        val r = try {
-            SevenZip.extract(archive.path, out.path, cancel)
-        } catch (e: UnsatisfiedLinkError) {
-            return R.string.arc_unsupported
-        }
-        return when {
-            r >= 0 -> null
-            r == -2 -> R.string.arc_memory                  // SZ_ERROR_MEM
-            r == -4 -> R.string.arc_unsupported             // encrypted or unknown method
-            r == -9 -> R.string.arc_write                   // SZ_ERROR_WRITE
-            r == -100 -> R.string.arc_bad_path
-            r == -101 -> R.string.arc_cancelled
-            else -> R.string.arc_damaged                    // data, CRC, not an archive, ...
-        }
-    }
-
-    /** ZIP with UTF-8 names; older Windows archives (CP437 names) are read on a second try. */
-    private fun unzip(archive: File, out: File, cancel: CancellationSignal): Int? {
+    private fun unzip(archive: File, out: File, names: Array<String?>, progress: ArcProgress): Int? {
         return try {
-            unzipWith(archive, out, cancel, Charsets.UTF_8)
-        } catch (e: IllegalArgumentException) {
-            out.listFiles()?.forEach { it.deleteRecursively() }
-            try {
-                unzipWith(archive, out, cancel, Charset.forName("IBM437"))
-            } catch (e2: Exception) {
-                R.string.arc_damaged
+            val root = out.canonicalPath + File.separator
+            openZip(archive).use { zip ->
+                val entries = zip.entries().toList()
+                val total = entries.withIndex().sumOf { (i, e) -> if (names.getOrNull(i) != null && !e.isDirectory) maxOf(e.size, 0) else 0L }
+                var done = 0L
+                for ((i, e) in entries.withIndex()) {
+                    val name = names.getOrNull(i) ?: continue
+                    if (!progress.step(done, total)) return R.string.arc_cancelled
+                    val target = File(out, name)
+                    // No entry may leave the output folder
+                    if (!target.canonicalPath.startsWith(root)) return R.string.arc_bad_path
+                    if (e.isDirectory) {
+                        target.mkdirs()
+                        continue
+                    }
+                    target.parentFile?.mkdirs()
+                    zip.getInputStream(e).use { i ->
+                        target.outputStream().use { o ->
+                            done = copy(i, o, done, total, progress) ?: return R.string.arc_cancelled
+                        }
+                    }
+                    if (e.time > 0) target.setLastModified(e.time)
+                }
+                progress.step(done, total)
             }
+            null
         } catch (e: ZipException) {
             if (e.message?.contains("encrypt", true) == true) R.string.arc_unsupported else R.string.arc_damaged
+        } catch (e: IllegalArgumentException) {
+            R.string.arc_damaged
         } catch (e: IOException) {
             R.string.arc_write
         }
     }
 
-    private fun unzipWith(archive: File, out: File, cancel: CancellationSignal, cs: Charset): Int? {
-        val root = out.canonicalPath + File.separator
-        ZipFile(archive, cs).use { zip ->
-            for (e in zip.entries()) {
-                if (cancel.isCanceled) return R.string.arc_cancelled
-                val target = File(out, e.name)
-                // No entry may leave the target folder ("../" in the name)
-                if (!target.canonicalPath.startsWith(root)) return R.string.arc_bad_path
-                if (e.isDirectory) {
-                    target.mkdirs()
-                    continue
-                }
-                target.parentFile?.mkdirs()
-                zip.getInputStream(e).use { i -> target.outputStream().use { i.copyTo(it) } }
-                if (e.time > 0) target.setLastModified(e.time)
+    /** Copies with progress; the new done count, or null when cancelled. */
+    private fun copy(i: InputStream, o: OutputStream, start: Long, total: Long, progress: ArcProgress): Long? {
+        val buf = ByteArray(64 * 1024)
+        var done = start
+        var last = 0L
+        while (true) {
+            val n = i.read(buf)
+            if (n < 0) return done
+            o.write(buf, 0, n)
+            done += n
+            if (done - last >= 512 * 1024) {
+                last = done
+                if (!progress.step(done, total)) return null
             }
         }
-        return null
+    }
+
+    /** Extracts one file of an archive to the cache, for opening it in another app. */
+    fun extractForView(ctx: Context, archive: File, inner: String): File? {
+        val dir = File(ctx.cacheDir, "view").apply { deleteRecursively(); mkdirs() }
+        val r = extract(ctx, archive, listOf(inner), dir, null) { _, _ -> true }
+        return File(dir, inner.substringAfterLast('/')).takeIf { r.error == null && it.isFile }
     }
 
     /** Packs [items] (files and folders) into [dstDir]/[name]. */
-    fun zip(ctx: Context, items: List<File>, dstDir: File, name: String, cancel: CancellationSignal): Result {
+    fun zip(ctx: Context, items: List<File>, dstDir: File, name: String, progress: ArcProgress): Result {
         val target = Transfer.createChild(ctx, dstDir, name, false) ?: return Result(R.string.arc_write)
+        val total = items.sumOf { size(ctx, it) }
+        var cancelled = false
         val ok = try {
             val output = Transfer.openOutput(ctx, target) ?: throw IOException()
             ZipOutputStream(output.buffered()).use { z ->
-                for (f in items) if (!add(ctx, z, f, f.name, target, cancel)) return@use false
+                var done = 0L
+                for (f in items) {
+                    done = add(ctx, z, f, f.name, target, done, total, progress) ?: run {
+                        cancelled = true
+                        return@use false
+                    }
+                }
+                progress.step(done, total)
                 true
             }
         } catch (e: IOException) {
             false
         }
         if (!ok) Transfer.delete(ctx, target)
-        return Result(if (ok) null else if (cancel.isCanceled) R.string.arc_cancelled else R.string.arc_write)
+        return Result(if (ok) null else if (cancelled) R.string.arc_cancelled else R.string.arc_write)
     }
 
-    private fun add(ctx: Context, z: ZipOutputStream, f: File, path: String, skip: File, cancel: CancellationSignal): Boolean {
-        if (cancel.isCanceled) return false
-        if (f.path == skip.path) return true   // the new archive itself, when it lies in a packed folder
-        val dir = Transfer.isDirectory(ctx, f) ?: return false
+    private fun size(ctx: Context, f: File): Long = when {
+        Transfer.isDirectory(ctx, f) == true -> Transfer.children(ctx, f).sumOf { size(ctx, it) }
+        Saf.isSaf(f) -> Saf.stat(ctx, f)?.size ?: 0
+        else -> f.length()
+    }
+
+    /** Adds [f] under [path]; the new done count, or null when cancelled. Throws IOException on read errors. */
+    private fun add(ctx: Context, z: ZipOutputStream, f: File, path: String, skip: File, start: Long, total: Long, progress: ArcProgress): Long? {
+        if (!progress.step(start, total)) return null
+        if (f.path == skip.path) return start   // the new archive itself, when it lies in a packed folder
+        val dir = Transfer.isDirectory(ctx, f) ?: throw IOException("gone")
         if (dir) {
             z.putNextEntry(ZipEntry("$path/"))
             z.closeEntry()
-            for (c in Transfer.children(ctx, f)) if (!add(ctx, z, c, "$path/${c.name}", skip, cancel)) return false
-            return true
+            var done = start
+            for (c in Transfer.children(ctx, f)) done = add(ctx, z, c, "$path/${c.name}", skip, done, total, progress) ?: return null
+            return done
         }
         val entry = ZipEntry(path)
         if (!Saf.isSaf(f)) entry.time = f.lastModified()
         z.putNextEntry(entry)
-        val input = Transfer.openInput(ctx, f) ?: return false
-        input.use { it.copyTo(z) }
+        val input = Transfer.openInput(ctx, f) ?: throw IOException("unreadable")
+        val done = input.use { copy(it, z, start, total, progress) } ?: return null
         z.closeEntry()
-        return true
+        return done
     }
 }
