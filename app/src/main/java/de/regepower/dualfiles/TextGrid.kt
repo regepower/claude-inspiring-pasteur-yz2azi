@@ -53,6 +53,8 @@ internal class TextGrid(context: Context) : View(context) {
     var onRange: (() -> Unit)? = null
     var onSelection: ((Boolean) -> Unit)? = null
     var onZoom: ((Float) -> Unit)? = null
+    /** Double tap on a word: it is marked, then this runs (the viewer copies it). */
+    var onDoubleWord: (() -> Unit)? = null
     /** The number of [columns] may have changed (size, zoom, line numbers): wrapped text must be redone. */
     var onColumns: (() -> Unit)? = null
 
@@ -286,8 +288,14 @@ internal class TextGrid(context: Context) : View(context) {
     private val gestures = GestureDetector(context, object : GestureDetector.SimpleOnGestureListener() {
         override fun onDown(e: MotionEvent) = true
 
-        override fun onSingleTapUp(e: MotionEvent): Boolean {
+        override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
             clearSelection()
+            return true
+        }
+
+        override fun onDoubleTap(e: MotionEvent): Boolean {
+            selectWord(e.x, e.y)
+            onDoubleWord?.invoke()
             return true
         }
 

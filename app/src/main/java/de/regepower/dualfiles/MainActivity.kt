@@ -134,6 +134,55 @@ internal interface NameRow {
  * keeps scrolling the list and swiping the pages. [onRange] tells the scroll bar about the range.
  */
 internal class PanList(context: Context) : ListView(context) {
+    /** Width of the icon column in px: a vertical drag that starts there marks a range (0 = off). */
+    var rangeZone = 0
+    var onRangeStart: ((Int) -> Unit)? = null
+    var onRangeMark: ((Int, Int) -> Unit)? = null
+    private var rangeCandidate = false
+    private var ranging = false
+    private var rangeStart = INVALID_POSITION
+    private var downY = 0f
+    private var downX0 = 0f
+    private val touchSlop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+
+    /** Marks while the finger moves; scrolls when it is near the top or bottom edge. */
+    private fun rangeTouch(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                ranging = false
+                rangeCandidate = rangeZone > 0 && ev.x < rangeZone
+                downY = ev.y
+                downX0 = ev.x
+                rangeStart = pointToPosition(ev.x.toInt(), ev.y.toInt())
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (rangeCandidate && !ranging && ev.pointerCount == 1) {
+                    val dy = Math.abs(ev.y - downY)
+                    if (dy > touchSlop * 1.5f && dy > Math.abs(ev.x - downX0) && rangeStart != INVALID_POSITION) {
+                        ranging = true
+                        val c = MotionEvent.obtain(ev.downTime, SystemClock.uptimeMillis(), MotionEvent.ACTION_CANCEL, ev.x, ev.y, 0)
+                        super.dispatchTouchEvent(c)
+                        c.recycle()
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                        onRangeStart?.invoke(rangeStart)
+                    }
+                }
+                if (ranging) {
+                    val edge = height / 8
+                    if (ev.y < edge) scrollListBy(-height / 30) else if (ev.y > height - edge) scrollListBy(height / 30)
+                    val pos = pointToPosition(width / 2, ev.y.toInt().coerceIn(1, height - 1))
+                    if (pos != INVALID_POSITION) onRangeMark?.invoke(rangeStart, pos)
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (ranging) {
+                ranging = false
+                rangeCandidate = false
+                return true
+            }
+        }
+        return false
+    }
     var contentWidth = 0f          // widest name of the list in px
     var offset = 0                 // px, the same for every visible row
     var onRange: ((Int, Int, Int) -> Unit)? = null
@@ -180,6 +229,7 @@ internal class PanList(context: Context) : ListView(context) {
     }
 
     override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (rangeTouch(ev)) return true
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 ignore = false
@@ -274,7 +324,7 @@ private class FileRow(ctx: Context) : LinearLayout(ctx), NameRow {
         inner.setPadding(ctx.dp(8), 0, ctx.dp(12), 0)
         name.textSize = 15f
         name.maxLines = 1
-        meta.textSize = 12f
+        meta.textSize = 13f
         meta.maxLines = 1
         inner.addView(name)
         inner.addView(meta)
@@ -327,6 +377,7 @@ class MainActivity : Activity() {
     private val settings by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
     @Volatile private var showHidden = false                   // read on the loader thread
     private var showThumbs = true
+    @Volatile private var showUpRow = true                     // ".." row; back and the path do the same
     private fun favorites(): Set<String> = settings.getStringSet("favs", null).orEmpty()
 
     @Suppress("DEPRECATION")
@@ -367,6 +418,7 @@ class MainActivity : Activity() {
         for (p in panes) expandTo(p, p.dir)
         showHidden = settings.getBoolean("hidden", false)
         showThumbs = settings.getBoolean("thumbs", true)
+        showUpRow = settings.getBoolean("updir", true)
 
         val root = FrameLayout(this)
         root.setBackgroundColor(getColor(R.color.md_surface))
@@ -514,8 +566,11 @@ class MainActivity : Activity() {
         bar.addView(top)
         val acts = LinearLayout(this)
         acts.setPadding(0, dp(6), 0, 0)
-        acts.addView(barAction(R.drawable.ic_copy, R.string.copy, false) { act(0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        acts.addView(barAction(R.drawable.ic_move, R.string.move, false) { act(1) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        // Tap: to the other side; hold: choose the destination (favourites, recent folders)
+        acts.addView(barAction(R.drawable.ic_copy, R.string.copy, false) { act(0) }.apply { setOnLongClickListener { pickDestination(0); true } },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        acts.addView(barAction(R.drawable.ic_move, R.string.move, false) { act(1) }.apply { setOnLongClickListener { pickDestination(1); true } },
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         acts.addView(barAction(R.drawable.ic_share, R.string.share, false) { shareSelected() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         acts.addView(barAction(R.drawable.ic_delete, R.string.delete, true) { act(2) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         bar.addView(acts)
@@ -547,8 +602,10 @@ class MainActivity : Activity() {
         val isFav = favorites().contains(p.dir.path)
         menu.menu.add(0, 1, 0, R.string.new_folder).isEnabled = !p.inArchive
         menu.menu.add(0, 2, 1, if (isFav) R.string.fav_remove else R.string.fav_add).isEnabled = !p.inArchive
-        menu.menu.add(0, 3, 2, R.string.settings_title)
-        menu.menu.add(0, 4, 3, R.string.help)
+        menu.menu.add(0, 5, 2, if (p === panes[0]) R.string.same_target else R.string.same_source)
+        menu.menu.add(0, 6, 3, R.string.swap_sides)
+        menu.menu.add(0, 3, 4, R.string.settings_title)
+        menu.menu.add(0, 4, 5, R.string.help)
         menu.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> askName(R.string.new_folder, "") { name -> runOp { Transfer.mkdir(this, p.dir, name) } }
@@ -560,6 +617,8 @@ class MainActivity : Activity() {
                 }
                 3 -> showSettings()
                 4 -> Help.show(this)
+                5 -> sameFolder()
+                6 -> swapSides()
             }
             true
         }
@@ -679,6 +738,7 @@ class MainActivity : Activity() {
     /** Storage locations: phone, SD/USB, chosen cloud folders (Drive, apps' providers), and adding one. */
     private fun showLocations(p: Pane) {
         val roots = allRoots()
+        val recent = recentFolders().filter { it.path != p.dir.path }.take(5)
         val current = roots.indexOfFirst { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") }
         val labels = roots.map { r ->
             when {
@@ -687,14 +747,16 @@ class MainActivity : Activity() {
                 rootNames[r.path] == getString(R.string.loc_internal) -> "📱 " + rootName(r)
                 else -> "💾 " + rootName(r)
             }
-        } + getString(R.string.loc_add) + getString(R.string.net_add)
+        } + recent.map { "🕘 " + folderLabel(it) } + getString(R.string.loc_add) + getString(R.string.net_add)
         AlertDialog.Builder(this)
             .setTitle(R.string.loc_title)
             .setSingleChoiceItems(labels.toTypedArray(), current) { d, which ->
                 d.dismiss()
+                val r = which - roots.size
                 when {
                     which < roots.size -> open(p, roots[which])
-                    which == roots.size -> pickTree()
+                    r < recent.size -> open(p, recent[r])
+                    r == recent.size -> pickTree()
                     else -> NetSetup.show(this) { root -> refreshAll(); open(p, root) }
                 }
             }
@@ -723,7 +785,12 @@ class MainActivity : Activity() {
     private fun rangeBar(list: PanList): RangeBar {
         val bar = RangeBar(this)
         bar.onDrag = { list.shiftNames(it) }
-        list.onRange = { content, viewport, offset -> bar.update(content, viewport, offset) }
+        list.onRange = { content, viewport, offset ->
+            bar.update(content, viewport, offset)
+            // Only when a name is wider than the list
+            val v = if (content > viewport) View.VISIBLE else View.GONE
+            if (bar.visibility != v) bar.visibility = v
+        }
         return bar
     }
 
@@ -758,6 +825,26 @@ class MainActivity : Activity() {
         styledList(list)
         p.fileList = list
         p.fileAdapter = FileAdapter(p)
+        // Drag down (or up) over the icons: marks every row on the way, like in a photo gallery
+        list.rangeZone = dp(48)
+        var rangeMark = true
+        var before: Set<File> = emptySet()
+        list.onRangeStart = { pos ->
+            val e = p.entries.getOrNull(pos)
+            rangeMark = e == null || e.file !in p.selected
+            for (other in panes) if (other !== p) other.selected.clear()
+            before = HashSet(p.selected)
+        }
+        list.onRangeMark = { a, b ->
+            p.selected.clear()
+            p.selected.addAll(before)
+            for (i in minOf(a, b)..maxOf(a, b)) {
+                val e = p.entries.getOrNull(i) ?: continue
+                if (e.up) continue
+                if (rangeMark) p.selected.add(e.file) else p.selected.remove(e.file)
+            }
+            refreshSelection()
+        }
         list.adapter = p.fileAdapter
         // One tap opens (folder, or file in its default app); marking is only done with the icon.
         list.setOnItemClickListener { _, _, pos, _ ->
@@ -855,6 +942,7 @@ class MainActivity : Activity() {
         if (!Vfs.isVirtual(dir) && !Archive.inside(dir) && !dir.canRead()) return
         p.dir = dir
         p.selected.clear()
+        remember(dir)
         expandTo(p, dir)
         p.treeList.offset = 0
         p.fileList.offset = 0
@@ -906,18 +994,22 @@ class MainActivity : Activity() {
         p.fileList.requestLayout()
     }
 
+    /** One list with every order and its direction: always two taps. */
     private fun showSortDialog(p: Pane) {
-        val values = SortBy.values()
+        val options = listOf(
+            Triple(SortBy.NAME, false, R.string.sort_name_az), Triple(SortBy.NAME, true, R.string.sort_name_za),
+            Triple(SortBy.DATE, true, R.string.sort_date_new), Triple(SortBy.DATE, false, R.string.sort_date_old),
+            Triple(SortBy.SIZE, true, R.string.sort_size_big), Triple(SortBy.SIZE, false, R.string.sort_size_small),
+            Triple(SortBy.TYPE, false, R.string.sort_type_az), Triple(SortBy.TYPE, true, R.string.sort_type_za),
+        )
+        val current = options.indexOfFirst { it.first == p.sortBy && it.second == p.sortDesc }
         AlertDialog.Builder(this)
             .setTitle(R.string.sort_title)
-            .setSingleChoiceItems(values.map { getString(it.label) }.toTypedArray(), values.indexOf(p.sortBy)) { d, which ->
-                p.sortBy = values[which]
+            .setSingleChoiceItems(options.map { getString(it.third) }.toTypedArray(), current) { d, which ->
+                p.sortBy = options[which].first
+                p.sortDesc = options[which].second
                 applyView(p)
                 d.dismiss()
-            }
-            .setNeutralButton(if (p.sortDesc) R.string.sort_asc else R.string.sort_desc) { _, _ ->
-                p.sortDesc = !p.sortDesc
-                applyView(p)
             }
             .show()
     }
@@ -986,7 +1078,7 @@ class MainActivity : Activity() {
         val df = DateFormat.getDateFormat(this)
         val tf = DateFormat.getTimeFormat(this)
         val namePaint = textPaint(15f)
-        val metaPaint = textPaint(12f)
+        val metaPaint = textPaint(13f)
         fun finish(e: Entry): Entry {
             if (e.up) {
                 e.width = namePaint.measureText(getString(R.string.up))
@@ -1092,7 +1184,7 @@ class MainActivity : Activity() {
         loader.execute {
             val nodes = buildNodes(expanded, favs)
             val virtual = Vfs.isVirtual(dir) || Archive.inside(dir)
-            val showUp = allRoots().none { it.path == dir.path } && (virtual && dir.parentFile != null || dir.parentFile?.canRead() == true)
+            val showUp = showUpRow && allRoots().none { it.path == dir.path } && (virtual && dir.parentFile != null || dir.parentFile?.canRead() == true)
             val entries = buildEntries(dir, showUp)
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
@@ -1219,6 +1311,8 @@ class MainActivity : Activity() {
             dialog.dismiss()
             runAction(code, file, mime)
         }
+        val textLike = !isDir && (mime?.startsWith("text/") == true ||
+            file.extension.lowercase() in setOf("json", "xml", "log", "md", "csv", "ini", "conf", "yml", "yaml", "sh", "kt", "java", "c", "h", "py", "js"))
         val quick = LinearLayout(this)
         quick.setPadding(0, dp(12), 0, dp(4))
         fun q(icon: Int, label: Int, code: Int, danger: Boolean = false) = quick.addView(barAction(icon, label, danger) { go(code) })
@@ -1227,7 +1321,13 @@ class MainActivity : Activity() {
         } else {
             q(R.drawable.ic_copy, R.string.copy, 0)
             q(R.drawable.ic_move, R.string.move, 1)
-            if (!isDir) q(R.drawable.ic_share, R.string.share, 4)
+            // Third symbol fits the entry: unpack an archive, view a text, else share
+            when {
+                isDir -> Unit
+                Archive.isArchiveName(file) -> q(R.drawable.ic_unarchive, R.string.unpack_short, 7)
+                textLike -> q(R.drawable.ic_view, R.string.view_short, 9)
+                else -> q(R.drawable.ic_share, R.string.share, 4)
+            }
             q(R.drawable.ic_edit, R.string.rename, 6)
             q(R.drawable.ic_delete, R.string.delete, 2, true)
         }
@@ -1251,10 +1351,16 @@ class MainActivity : Activity() {
             setBackgroundResource(sel.resourceId)
             setOnClickListener { go(code) }
         })
+        if (!inArchive) {
+            group(R.string.menu_to)
+            entry(R.string.copy_to, 12)
+            entry(R.string.move_to, 13)
+        }
         if (!isDir) {
             group(R.string.menu_open)
             if (!inArchive) entry(R.string.open_with, 3)
             entry(R.string.view_open, 9)
+            if (!inArchive && (Archive.isArchiveName(file) || textLike)) entry(R.string.share, 4)
             if (!inArchive && FilePrint.canPrint(mime)) entry(R.string.print, 5)
         }
         if (!inArchive) {
@@ -1288,6 +1394,8 @@ class MainActivity : Activity() {
             6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
             7 -> askExtract(file, listOf(""))
             9 -> viewFile(file)
+            12 -> pickDestination(0)
+            13 -> pickDestination(1)
             10 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, false)
             11 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, true)
             8 -> {
@@ -1315,9 +1423,9 @@ class MainActivity : Activity() {
     }
 
     /** [which]: 0 copy, 1 move, 2 delete; source is the pane with a selection, target the other one. */
-    private fun act(which: Int) {
+    private fun act(which: Int, to: File? = null) {
         val src = panes.firstOrNull { it.selected.isNotEmpty() } ?: return
-        val dstDir = (if (src === panes[0]) panes[1] else panes[0]).dir
+        val dstDir = to ?: (if (src === panes[0]) panes[1] else panes[0]).dir
         val items = src.selected.toList()
         Archive.split(src.dir)?.let { (arc, inner) ->
             if (which == 0) askExtract(arc, items.map { if (inner.isEmpty()) it.name else "$inner/${it.name}" })
@@ -1376,6 +1484,55 @@ class MainActivity : Activity() {
             val msg = resources.getQuantityString(done, ok, ok, dst?.let { folderName(it) } ?: "")
             Archive.Result(if (m.cancelled) R.string.arc_cancelled else null, failed, msg)
         }
+    }
+
+    // ---- Recent folders and destinations ----
+
+    /** Last opened folders, newest first (kept across starts). */
+    private fun recentFolders(): List<File> = settings.getString("recent", "")!!.split('\n').filter { it.isNotEmpty() }.map { File(it) }
+
+    private fun remember(dir: File) {
+        val list = listOf(dir) + recentFolders().filter { it.path != dir.path }
+        settings.edit().putString("recent", list.take(12).joinToString("\n") { it.path }).apply()
+    }
+
+    /** "Camera — Intern/DCIM" style label: name first, where it is after. */
+    private fun folderLabel(dir: File): String {
+        val root = allRoots().firstOrNull { dir.path == it.path || dir.path.startsWith(it.path + "/") }
+        val name = folderName(dir)
+        if (root == null || root.path == dir.path) return name
+        val parent = dir.parent?.removePrefix(root.path)?.trim('/') ?: ""
+        return name + "  —  " + rootName(root) + (if (parent.isEmpty()) "" else "/$parent")
+    }
+
+    /**
+     * "Copy to…" / "Move to…": the other side's folder, favourites and recent folders, so a different
+     * destination needs no trip to the other side.
+     */
+    private fun pickDestination(which: Int) {
+        val src = panes.firstOrNull { it.selected.isNotEmpty() } ?: return
+        val other = (if (src === panes[0]) panes[1] else panes[0]).dir
+        val choices = (listOf(other) + favorites().sorted().map { File(it) } + recentFolders())
+            .distinctBy { it.path }.filter { it.path != src.dir.path && !Archive.inside(it) }.take(12)
+        val labels = choices.mapIndexed { i, f -> (if (i == 0) "➜ " else if (favorites().contains(f.path)) "★ " else "🕘 ") + folderLabel(f) }
+        AlertDialog.Builder(this)
+            .setTitle(if (which == 0) R.string.copy_to else R.string.move_to)
+            .setItems(labels.toTypedArray()) { _, i -> act(which, choices[i]) }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Target shows the same folder as the source (or the other way round on the target pages). */
+    private fun sameFolder() {
+        val p = currentPane()
+        val other = if (p === panes[0]) panes[1] else panes[0]
+        open(other, p.dir)
+    }
+
+    private fun swapSides() {
+        val a = panes[0].dir
+        open(panes[0], panes[1].dir)
+        open(panes[1], a)
     }
 
     /** Short name of a folder for messages: the storage name for a root, else the folder name. */
@@ -1753,6 +1910,7 @@ class MainActivity : Activity() {
             getString(if (showHidden) R.string.hidden_hide else R.string.hidden_show),
             getString(if (showThumbs) R.string.thumbs_off else R.string.thumbs_on),
             getString(R.string.report_title),
+            getString(if (showUpRow) R.string.updir_hide else R.string.updir_show),
         )
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
@@ -1781,6 +1939,11 @@ class MainActivity : Activity() {
                         settings.edit().putBoolean("thumbs", showThumbs).apply()
                         if (!showThumbs) Thumbs.clear()
                         for (p in panes) p.fileAdapter.notifyDataSetChanged()
+                    }
+                    8 -> {
+                        showUpRow = !showUpRow
+                        settings.edit().putBoolean("updir", showUpRow).apply()
+                        refreshAll()
                     }
                     7 -> Thread {
                         val f = Report.build(this)

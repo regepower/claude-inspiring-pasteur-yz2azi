@@ -191,6 +191,7 @@ class ViewerActivity : Activity() {
         numbers = prefs.getBoolean("viewer_numbers", false)
         wrap = prefs.getBoolean("viewer_wrap", false)
         grid.onColumns = { if (wrap && !hex) rebuildWrap() }
+        grid.onDoubleWord = { copySelection(false) }
         grid.setTextSizeSp(prefs.getFloat("viewer_sp", 13f))
         grid.onZoom = { prefs.edit().putFloat("viewer_sp", it).apply() }
         grid.onSelection = { on -> selBar.visibility = if (on) View.VISIBLE else View.GONE }

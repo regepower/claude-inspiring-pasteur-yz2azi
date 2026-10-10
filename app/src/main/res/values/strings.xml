@@ -43,14 +43,14 @@
     </string-array>
     <string-array name="help_bodies">
         <item>Swipe left and right (or tap the tabs): Tree S (folder tree of the source), Source (its files), Target, Tree T. Source and target have different colours and the letter S or T in the band. Copy, move, unpack and pack always go from the marked side to the other side.</item>
-        <item>Tap a row to open it: a folder opens in the list, a file in its app. A file\'s icon shows the app that opens it; pictures and videos show a preview. \"..\" goes one folder up, so does the back key. Marking: tap the icon on the left (or hold the row), a check appears. While something is marked, tapping a row marks it too instead of opening it; once nothing is marked, a tap opens again. Drag sideways with two fingers to scroll long names.</item>
-        <item>Hold a row to open a sheet at the bottom: name and size, then symbols for copy, move, share, rename and delete, then depending on the file open with, view (text/hex), print, unpack ZIP/7z, pack as ZIP, and copy pictures as WebP to the target or convert them to WebP here (the original is deleted only after the conversion worked). With marked items, the bar at the bottom shows count and size, All, Invert, Clear and the actions. Installing an APK needs the permission \"Install unknown apps\" once.</item>
-        <item>Tap the arrow to unfold a folder, tap the name to open it on the next page. Top right: sort (name, date, size, type, ascending or descending) and filter (pictures, videos, documents, name contains …; the symbol is coloured while a filter is on) – both apply to the side that is shown. ⋮ top right: new folder, add the folder to the favourites or remove it (favourites are at the top of the tree with ★), settings, help.</item>
-        <item>The field on the left of the coloured band (e.g. \"Internal ▾\") picks the storage: internal, SD card, USB, cloud folders of other apps (☁, e.g. Google Drive, via \"Add cloud / drive\") and network servers (🌐). Network servers: FTP, FTPS or WebDAV (e.g. Nextcloud with start folder remote.php/dav/files/NAME); \"Search in Wi-Fi\" finds servers that announce themselves. The connection is tested before saving, passwords are stored encrypted. Files from a server are loaded first to open them. The path is on the right of the band, every part can be tapped.</item>
+        <item>Tap a row to open it: a folder opens in the list, a file in its app. A file\'s icon shows the app that opens it; pictures and videos show a preview. \"..\" goes one folder up, so does the back key. Marking: tap the icon on the left (or hold the row), a check appears. While something is marked, tapping a row marks it too instead of opening it; once nothing is marked, a tap opens again. Mark a range: start on an icon on the left and drag over the icons up or down (the list scrolls at the edge). Drag sideways with two fingers to scroll long names.</item>
+        <item>Hold a row to open a sheet at the bottom: name and size, then symbols for copy, move, rename, delete and a fitting quick action (archive: unpack, text: view, otherwise share), then depending on the file open with, view (text/hex), print, unpack ZIP/7z, pack as ZIP, copy to… / move to… (target, favourites, recent folders) and copy pictures as WebP to the target or convert them to WebP here (the original is deleted only after the conversion worked). With marked items, the bar at the bottom shows count and size, All, Invert, Clear and the actions. Holding Copy or Move there also opens the destination list. Installing an APK needs the permission \"Install unknown apps\" once.</item>
+        <item>Tap the arrow to unfold a folder, tap the name to open it on the next page. Top right: sort (list: name A–Z/Z–A, date new/old, size, type) and filter (pictures, videos, documents, name contains …; the symbol is coloured while a filter is on) – both apply to the side that is shown. ⋮ top right: new folder, add the folder to the favourites or remove it (favourites are at the top of the tree with ★), target = source or source = target (the other side shows the same folder), swap sides, settings, help.</item>
+        <item>The field on the left of the coloured band (e.g. \"Internal ▾\") picks the storage: internal, SD card, USB, cloud folders of other apps (☁, e.g. Google Drive, via \"Add cloud / drive\") and network servers (🌐). Below them the 5 most recent folders (🕘). Network servers: FTP, FTPS or WebDAV (e.g. Nextcloud with start folder remote.php/dav/files/NAME); \"Search in Wi-Fi\" finds servers that announce themselves. The connection is tested before saving, passwords are stored encrypted. Files from a server are loaded first to open them. The path is on the right of the band, every part can be tapped.</item>
         <item>A ZIP or 7z archive opens like a folder with one tap (read-only), also in the tree. Mark entries and copy (or hold → unpack): only these are unpacked, into a folder named after the archive or directly into the target. Tap a file inside to open it. Password-protected archives are not supported.</item>
-        <item>View (text/hex) opens even very large files at once. One finger scrolls both ways, two fingers zoom the text. Hold a word to mark it, the round handles extend the mark; then copy, share or all. Top right switches between text and hex; ⋮ turns line numbers and wrapping (files up to 4 MB) on and off. Back first removes a mark.</item>
+        <item>View (text/hex) opens even very large files at once. One finger scrolls both ways, two fingers zoom the text. Hold a word to mark it, the round handles extend the mark; then copy, share or all. Double-tap a word to mark and copy it at once. Top right switches between text and hex; ⋮ turns line numbers and wrapping (files up to 4 MB) on and off. Back first removes a mark.</item>
         <item>If a name already exists in the target, the app asks: overwrite (folders are merged), skip or keep both (\"name (1)\"), optionally for all. Copy, move, delete, pack and unpack show their progress and can be cancelled; a half-copied file is removed. Afterwards the app says what was done (e.g. \"3 items copied to Download\").</item>
-        <item>⋮ top right → Settings: fixed app per file type (change or delete), add or remove cloud folders, show hidden files, previews on/off, save and load the configuration (app choices, favourites, settings), error report (last crash or hang, to copy or share).</item>
+        <item>⋮ top right → Settings: fixed app per file type (change or delete), add or remove cloud folders, show hidden files, previews on/off, show/hide the \"..\" row, save and load the configuration (app choices, favourites, settings), error report (last crash or hang, to copy or share).</item>
         <item>The app needs \"all files access\"; the system setting opens on first start. No data is collected or sent. The app only goes online to servers you added yourself.</item>
     </string-array>
     <string name="open_with">Open with…</string>
@@ -60,8 +60,6 @@
     <string name="sort_date">Date</string>
     <string name="sort_size">Size</string>
     <string name="sort_type">Type</string>
-    <string name="sort_asc">Ascending</string>
-    <string name="sort_desc">Descending</string>
     <string name="filter_title">Show</string>
     <string name="filter_all">All</string>
     <string name="filter_folders">Folders</string>
@@ -206,4 +204,22 @@
     <string name="view_numbers">Line numbers</string>
     <string name="view_wrap">Wrap lines</string>
     <string name="view_wrap_limit">Wrapping works for files up to %1$d MB</string>
+    <string name="sort_name_az">Name A–Z</string>
+    <string name="sort_name_za">Name Z–A</string>
+    <string name="sort_date_new">Date, newest first</string>
+    <string name="sort_date_old">Date, oldest first</string>
+    <string name="sort_size_big">Size, largest first</string>
+    <string name="sort_size_small">Size, smallest first</string>
+    <string name="sort_type_az">Type A–Z</string>
+    <string name="sort_type_za">Type Z–A</string>
+    <string name="copy_to">Copy to…</string>
+    <string name="move_to">Move to…</string>
+    <string name="same_target">Target = this folder</string>
+    <string name="same_source">Source = this folder</string>
+    <string name="swap_sides">Swap sides</string>
+    <string name="menu_to">Destination</string>
+    <string name="unpack_short">Unpack</string>
+    <string name="view_short">View</string>
+    <string name="updir_hide">Hide the \"..\" row</string>
+    <string name="updir_show">Show the \"..\" row</string>
 </resources>
