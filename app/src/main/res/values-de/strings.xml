@@ -131,4 +131,5 @@
     <string name="view_too_big">Zu viel markiert (mehr als %1$d Mio. Zeichen)</string>
     <string name="view_copied_what">Kopiert: \"%1$s\" (%2$d Zeichen)</string>
     <string name="report_title">Fehlerbericht (kopieren oder teilen)</string>
+    <string name="apk_permission">Zum Installieren eines APK braucht DualFiles die Berechtigung \"Unbekannte Apps installieren\". Nach dem Erlauben öffnet sich das APK wieder.</string>
 </resources>

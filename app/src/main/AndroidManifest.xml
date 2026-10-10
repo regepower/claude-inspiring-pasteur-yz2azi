@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Hands APK files to Android's package installer (asked for once, only when an APK is opened). -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- A file manager needs all-files access; granted by the user in system settings. -->
     <uses-permission
         android:name="android.permission.MANAGE_EXTERNAL_STORAGE"

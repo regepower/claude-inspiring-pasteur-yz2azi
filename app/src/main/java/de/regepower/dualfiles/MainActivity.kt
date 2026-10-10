@@ -390,6 +390,10 @@ class MainActivity : Activity() {
         permView.visibility = if (ok) View.GONE else View.VISIBLE
         assocCache.clear()
         if (ok) refreshAll()
+        pendingApk?.let {
+            pendingApk = null
+            if (packageManager.canRequestPackageInstalls() && it.isFile) openFile(it)
+        }
     }
 
     // ---- UI construction ----
@@ -1387,8 +1391,22 @@ class MainActivity : Activity() {
         return assocCache[ext]
     }
 
+    private var pendingApk: File? = null   // opened again after "install unknown apps" was allowed
+
     private fun openFile(f: File) {
         val ext = f.extension.lowercase()
+        // The package installer silently ignores APKs from apps without this permission
+        if (ext == "apk" && !packageManager.canRequestPackageInstalls()) {
+            AlertDialog.Builder(this)
+                .setMessage(R.string.apk_permission)
+                .setPositiveButton(R.string.perm_button) { _, _ ->
+                    pendingApk = f
+                    start(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+                }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            return
+        }
         val cn = assocFor(ext)
         start(if (cn != null) viewIntent(f).setComponent(cn) else chooserFor(ext, viewIntent(f)))
     }

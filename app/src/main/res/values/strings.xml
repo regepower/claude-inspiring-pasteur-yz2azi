@@ -139,4 +139,5 @@
     <string name="view_too_big">Too much marked (more than %1$d million characters)</string>
     <string name="view_copied_what">Copied: \"%1$s\" (%2$d characters)</string>
     <string name="report_title">Error report (copy or share it)</string>
+    <string name="apk_permission">To install an APK, Android needs the permission \"Install unknown apps\" for DualFiles. The APK opens again after you allow it.</string>
 </resources>
