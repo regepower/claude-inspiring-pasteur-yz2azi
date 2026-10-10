@@ -992,32 +992,44 @@ class MainActivity : Activity() {
                 val names = items.filter { it.parentFile?.path != dstDir.path }.map { it.name }
                 resolveClashes(dstDir, names) { m ->
                     val run = items.filter { m[it.name] != Clash.SKIP }
-                    execute(run) {
-                        val ow = m[it.name] == Clash.OVERWRITE
-                        if (which == 0) Transfer.copy(this, it, dstDir, ow) else Transfer.move(this, it, dstDir, ow)
+                    execute(if (which == 0) R.string.op_copying else R.string.op_moving, run, false) { f, meter ->
+                        val ow = m[f.name] == Clash.OVERWRITE
+                        if (which == 0) Transfer.copy(this, f, dstDir, ow, meter) else Transfer.move(this, f, dstDir, ow, meter)
                     }
                 }
             }
             else -> AlertDialog.Builder(this)
                 .setMessage(getString(R.string.delete_confirm, items.size))
-                .setPositiveButton(R.string.delete) { _, _ -> execute(items) { Transfer.delete(this, it) } }
+                .setPositiveButton(R.string.delete) { _, _ -> execute(R.string.op_deleting, items, true) { f, meter -> Transfer.delete(this, f, meter) } }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
         }
     }
 
-    private fun execute(items: List<File>, op: (File) -> Boolean) {
-        Thread {
+    /**
+     * Runs [op] for each item with the progress dialog: bytes for copy/move, entries for delete ([count]).
+     * Cancel stops after the current file; a half-copied file is removed.
+     */
+    private fun execute(title: Int, items: List<File>, count: Boolean, op: (File, Meter) -> Boolean) {
+        runArchive(title, count) { pr ->
+            val m = Meter(pr)
+            val parts = items.map { if (count) Transfer.count(this, it) else Transfer.size(this, it) }
+            m.total = parts.sum()
+            m.report()
             var failed = 0
-            for (f in items) if (!op(f)) failed++
-            runOnUiThread {
-                for (p in panes) p.selected.clear()
-                counts.clear()
-                refreshAll()
-                val msg = if (failed == 0) getString(R.string.done) else getString(R.string.done_failed, failed)
-                Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+            var before = 0L
+            for ((i, f) in items.withIndex()) {
+                if (m.cancelled) break
+                if (!op(f, m)) failed++
+                // A rename moves without copying bytes: count the item as done
+                before += parts[i]
+                if (!m.cancelled) {
+                    m.done = before
+                    m.report()
+                }
             }
-        }.start()
+            Archive.Result(if (m.cancelled) R.string.arc_cancelled else null, failed)
+        }
     }
 
     /** Menu of the pane's folder (chip ⋮): new folder, favourite on/off. */
@@ -1171,7 +1183,7 @@ class MainActivity : Activity() {
     }
 
     /** Runs a pack/unpack job off the UI thread with a dialog that can cancel it; errors are shown as text. */
-    private fun runArchive(message: Int, job: (ArcProgress) -> Archive.Result) {
+    private fun runArchive(message: Int, count: Boolean = false, job: (ArcProgress) -> Archive.Result) {
         val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
         val bar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
         bar.max = 1000
@@ -1198,7 +1210,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     bar.isIndeterminate = total <= 0
                     if (total > 0) bar.progress = (done * 1000 / total).toInt()
-                    text.text = getString(R.string.arc_progress, kb(done), kb(total))
+                    text.text = if (count) getString(R.string.op_count, done, total) else getString(R.string.arc_progress, kb(done), kb(total))
                 }
             }
             !cancelled.get()
@@ -1211,7 +1223,10 @@ class MainActivity : Activity() {
                 counts.clear()
                 refreshAll()
                 val err = r.error
-                if (err == null) Toast.makeText(this, R.string.done, Toast.LENGTH_SHORT).show()
+                if (err == null) {
+                    val msg = if (r.failed == 0) getString(R.string.done) else getString(R.string.done_failed, r.failed)
+                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                }
                 else AlertDialog.Builder(this).setMessage(err).setPositiveButton(R.string.help_ok, null).show()
             }
         }.start()

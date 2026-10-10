@@ -36,7 +36,7 @@ internal object SevenZip {
  */
 internal object Archive {
     /** Error text resource for a failed run; null means success. */
-    class Result(val error: Int?)
+    class Result(val error: Int?, val failed: Int = 0)
 
     /** One entry; [index] is its position in the archive, -1 for a folder that only exists implicitly. */
     class Item(val index: Int, val path: String, val isDir: Boolean, val size: Long, val modified: Long) {
@@ -290,7 +290,7 @@ internal object Archive {
     fun zip(ctx: Context, items: List<File>, dstDir: File, name: String, overwrite: Boolean, progress: ArcProgress): Result {
         if (overwrite) File(dstDir, name).let { if (Transfer.isDirectory(ctx, it) == false) Transfer.delete(ctx, it) }
         val target = Transfer.createChild(ctx, dstDir, name, false) ?: return Result(R.string.arc_write)
-        val total = items.sumOf { size(ctx, it) }
+        val total = items.sumOf { Transfer.size(ctx, it) }
         var cancelled = false
         val ok = try {
             val output = Transfer.openOutput(ctx, target) ?: throw IOException()
@@ -310,12 +310,6 @@ internal object Archive {
         }
         if (!ok) Transfer.delete(ctx, target)
         return Result(if (ok) null else if (cancelled) R.string.arc_cancelled else R.string.arc_write)
-    }
-
-    private fun size(ctx: Context, f: File): Long = when {
-        Transfer.isDirectory(ctx, f) == true -> Transfer.children(ctx, f).sumOf { size(ctx, it) }
-        Saf.isSaf(f) -> Saf.stat(ctx, f)?.size ?: 0
-        else -> f.length()
     }
 
     /** Adds [f] under [path]; the new done count, or null when cancelled. Throws IOException on read errors. */

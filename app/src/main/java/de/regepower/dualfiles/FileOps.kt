@@ -3,8 +3,8 @@ package de.regepower.dualfiles
 import android.webkit.MimeTypeMap
 import java.io.File
 
-/** Plain java.io file operations. Every function returns true on success. */
-object FileOps {
+/** Plain java.io file operations. Every function returns true on success; [Meter] counts and cancels. */
+internal object FileOps {
 
     /** MIME type from the file extension, or null if unknown. */
     fun mime(f: File): String? {
@@ -28,53 +28,61 @@ object FileOps {
     }
 
     /** [overwrite]: an existing file of the same name is replaced, an existing folder is merged into. */
-    fun copy(src: File, dstDir: File, overwrite: Boolean = false): Boolean {
+    fun copy(src: File, dstDir: File, overwrite: Boolean = false, m: Meter? = null): Boolean {
         if (src.isDirectory && isInside(dstDir, src)) return false
         val target = if (overwrite) File(dstDir, src.name) else uniqueTarget(dstDir, src.name)
         if (overwrite && target.canonicalPath == src.canonicalPath) return true
-        return copyTo(src, target)
+        return copyTo(src, target, m)
     }
 
-    private fun copyTo(src: File, dst: File): Boolean {
+    private fun copyTo(src: File, dst: File, m: Meter?): Boolean {
+        if (m?.cancelled == true) return false
         if (!src.isDirectory) {
             if (dst.isDirectory) return false
             return try {
-                src.inputStream().use { input -> dst.outputStream().use { input.copyTo(it) } }
+                src.inputStream().use { input -> dst.outputStream().use { Meter.pump(input, it, m) } }
                 true
             } catch (e: java.io.IOException) {
+                if (e is Cancelled) dst.delete()   // no half-copied file stays behind
                 false
             }
         }
         if (!dst.isDirectory && !dst.mkdirs()) return false
         var ok = true
         for (child in src.listFiles().orEmpty()) {
-            if (!copyTo(child, File(dst, child.name))) ok = false
+            if (!copyTo(child, File(dst, child.name), m)) ok = false
+            if (m?.cancelled == true) return false
         }
         return ok
     }
 
-    fun move(src: File, dstDir: File, overwrite: Boolean = false): Boolean {
+    fun move(src: File, dstDir: File, overwrite: Boolean = false, m: Meter? = null): Boolean {
         if (src.isDirectory && isInside(dstDir, src)) return false
         if (src.parentFile?.canonicalPath == dstDir.canonicalPath) return true
         val target = if (overwrite) File(dstDir, src.name) else uniqueTarget(dstDir, src.name)
         if (target.exists()) {
             // Overwrite: a file replaces the file, a folder is merged into the folder
             if (src.isFile && target.isFile && target.delete() && src.renameTo(target)) return true
-            return copyTo(src, target) && delete(src)
+            return copyTo(src, target, m) && delete(src)
         }
         if (src.renameTo(target)) return true
         // Different volume: copy, then delete the source only if everything was copied.
-        return copyTo(src, target) && delete(src)
+        return copyTo(src, target, m) && delete(src)
     }
 
-    fun delete(f: File): Boolean {
+    /** [m] counts one per deleted entry. */
+    fun delete(f: File, m: Meter? = null): Boolean {
+        if (m?.cancelled == true) return false
         var ok = true
         if (f.isDirectory) {
             for (child in f.listFiles().orEmpty()) {
-                if (!delete(child)) ok = false
+                if (!delete(child, m)) ok = false
+                if (m?.cancelled == true) return false
             }
         }
-        return f.delete() && ok
+        val gone = f.delete() && ok
+        m?.add(1)
+        return gone
     }
 
     /** True if [dir] is [parent] itself or lies below it. */

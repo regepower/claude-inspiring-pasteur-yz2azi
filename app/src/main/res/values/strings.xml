@@ -123,4 +123,8 @@
     <string name="clash_skip">Skip</string>
     <string name="clash_keep">Keep both</string>
     <string name="clash_all">For all %1$d conflicts</string>
+    <string name="op_copying">Copying…</string>
+    <string name="op_moving">Moving…</string>
+    <string name="op_deleting">Deleting…</string>
+    <string name="op_count">%1$d of %2$d entries</string>
 </resources>

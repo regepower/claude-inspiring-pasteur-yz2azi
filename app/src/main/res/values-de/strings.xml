@@ -116,4 +116,8 @@
     <string name="clash_skip">Überspringen</string>
     <string name="clash_keep">Beide behalten</string>
     <string name="clash_all">Für alle %1$d Konflikte</string>
+    <string name="op_copying">Kopiere…</string>
+    <string name="op_moving">Verschiebe…</string>
+    <string name="op_deleting">Lösche…</string>
+    <string name="op_count">%1$d von %2$d Einträgen</string>
 </resources>
