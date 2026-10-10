@@ -1701,7 +1701,7 @@ class MainActivity : Activity() {
             // Icon: filled folder, or the file's extension on a colour from its hue; check badge when marked.
             val ext = if (isDir) "" else f.extension.lowercase().take(4)
             val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(f.extension.lowercase())
-            val appBitmap = if (isDir) null else assocCached(f.extension.lowercase())?.let { AppBadges.get(this@MainActivity, it.packageName) }
+            val appBitmap = if (isDir) null else assocCached(f.extension.lowercase())?.let { AppBadges.get(this@MainActivity, it) }
             // Preview of images and videos (setting), made in the background; the rows redraw when it is ready
             val thumb = if (!isDir && showThumbs && !p.inArchive && Thumbs.canPreview(f)) {
                 Thumbs.get(this@MainActivity, f, e.modified) { for (q in panes) q.fileAdapter.notifyDataSetChanged() }

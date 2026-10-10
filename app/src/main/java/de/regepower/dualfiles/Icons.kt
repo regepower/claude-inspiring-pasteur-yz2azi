@@ -265,31 +265,49 @@ internal class EntryIcon(
 }
 
 /**
- * Icon of an app for the file-type badge: its monochrome layer on Android 13+, otherwise the foreground
- * layer of its adaptive icon turned into a single-colour silhouette (alpha only).
+ * Symbol of the app set for a file type, as a single-colour silhouette (alpha only). Tried in order:
+ * the opening activity's own icon, then the app icon; of each the monochrome layer (Android 13+),
+ * the foreground layer, the whole icon. A layer counts only if it is a real symbol: not empty and not a
+ * filled square (some apps ship a blank monochrome layer or a square bitmap). null = show the extension.
  */
 internal object AppBadges {
     private const val SIZE = 48
     private val cache = HashMap<String, Bitmap?>()   // UI thread only
 
-    fun get(context: Context, pkg: String): Bitmap? = cache.getOrPut(pkg) { render(context, pkg) }
+    fun get(context: Context, cn: android.content.ComponentName): Bitmap? =
+        cache.getOrPut(cn.flattenToString()) { render(context, cn) }
+
+    private fun render(context: Context, cn: android.content.ComponentName): Bitmap? {
+        val pm = context.packageManager
+        val icons = listOfNotNull(
+            try { pm.getActivityIcon(cn) } catch (e: Exception) { null },
+            try { pm.getApplicationIcon(cn.packageName) } catch (e: Exception) { null },
+        )
+        for (icon in icons) for (layer in layers(icon)) silhouette(layer)?.let { return it }
+        return null
+    }
 
     @SuppressLint("NewApi")
-    private fun render(context: Context, pkg: String): Bitmap? = try {
-        val icon = context.packageManager.getApplicationIcon(pkg)
-        val src = when {
-            icon !is AdaptiveIconDrawable -> icon
-            Build.VERSION.SDK_INT >= 33 && icon.monochrome != null -> icon.monochrome!!
-            else -> icon.foreground ?: icon
-        }
+    private fun layers(icon: Drawable): List<Drawable> {
+        if (icon !is AdaptiveIconDrawable) return listOf(icon)
+        val mono = if (Build.VERSION.SDK_INT >= 33) icon.monochrome else null
+        return listOfNotNull(mono, icon.foreground, icon)
+    }
+
+    private fun silhouette(src: Drawable): Bitmap? = try {
         val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
         src.setBounds(0, 0, SIZE, SIZE)
         src.draw(Canvas(bmp))
         val px = IntArray(SIZE * SIZE)
         bmp.getPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
-        for (i in px.indices) px[i] = (px[i] ushr 24 shl 24) or 0xFFFFFF
-        bmp.setPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
-        bmp
+        var solid = 0
+        for (i in px.indices) {
+            if (px[i] ushr 24 > 128) solid++
+            px[i] = (px[i] ushr 24 shl 24) or 0xFFFFFF
+        }
+        val share = solid.toFloat() / px.size
+        if (share < 0.03f || share > 0.8f) null
+        else bmp.apply { setPixels(px, 0, SIZE, 0, 0, SIZE, SIZE) }
     } catch (e: Exception) {
         null
     }
