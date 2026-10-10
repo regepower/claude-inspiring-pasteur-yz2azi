@@ -11,7 +11,7 @@
     <color name="md_tertiary_container">#FFD8E4</color>
     <color name="md_error_container">#FFDAD6</color>
     <color name="md_on_error_container">#410002</color>
-    <color name="ic_launcher_background">#1F5FBF</color>
+    <color name="ic_launcher_background">#3949AB</color>
     <!-- Text on surface (primary) and secondary text: readable contrast. -->
     <color name="md_on_surface">#1A1C1E</color>
     <color name="md_on_surface_variant">#44474E</color>
