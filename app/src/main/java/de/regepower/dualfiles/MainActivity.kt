@@ -47,6 +47,7 @@ import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.ScrollView
 import android.widget.ListView
 import android.widget.TextView
 import android.widget.Toast
@@ -60,7 +61,7 @@ import java.util.concurrent.Executors
 
 // Folder icons are yellow like in Windows; the two panes take the Material You primary and tertiary colours.
 private const val FOLDER_YELLOW = 0xFFFFC83D.toInt()
-private const val ERROR_COLOR = 0xFFB3261E.toInt()
+private const val ERROR_COLOR_LIGHT = 0xFFFFB4AB.toInt()   // error text on the dark container
 private const val REQ_TREE = 1
 private const val REQ_SAVE = 2
 private const val REQ_LOAD = 3
@@ -118,8 +119,8 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     var filter = Filter.ALL
     var nameQuery = ""
     var inArchive = false                 // dir lies inside a ZIP/7z archive (read-only)
-    lateinit var sortChip: TextView
-    lateinit var filterChip: TextView
+    lateinit var emptyView: TextView      // "folder is empty" over the list
+    lateinit var loading: View            // thin bar under the band while a folder is read
 }
 
 /** A list row whose name can be moved sideways; [clip] is the visible part of the name. */
@@ -311,6 +312,8 @@ class MainActivity : Activity() {
     private lateinit var permView: View
     private lateinit var bar: LinearLayout
     private lateinit var barCount: TextView
+    private lateinit var sortBtn: ImageButton
+    private lateinit var filterBtn: ImageButton
     private val tabs = ArrayList<TextView>()
     private var roots: List<File> = emptyList()
     private fun allRoots() = roots + Vfs.rootFiles(this)
@@ -343,9 +346,9 @@ class MainActivity : Activity() {
                 it.onColor = getColor(R.color.md_on_primary)
                 it.filePage = 1
             },
-            Pane(getColor(R.color.md_tertiary), R.string.band_target, primary).also {
+            Pane(targetColors().first, R.string.band_target, primary).also {
                 it.treePage = 3
-                it.onColor = getColor(R.color.md_on_tertiary)
+                it.onColor = targetColors().second
                 it.filePage = 2
             }
         )
@@ -441,47 +444,36 @@ class MainActivity : Activity() {
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
 
-        // Header row (same in all our apps, without config save/load): app name left, help right.
+        // Header: app name, then sort / filter of the visible side and ⋮ (folder, settings, help)
         val head = LinearLayout(this)
         head.gravity = Gravity.CENTER_VERTICAL
-        head.setPadding(dp(16), dp(4), dp(8), dp(4))
+        head.setPadding(dp(16), dp(2), dp(4), dp(2))
         val title = TextView(this)
         title.setText(R.string.app_name)
-        title.textSize = 24f
+        title.textSize = 22f
         title.typeface = Typeface.DEFAULT_BOLD
         title.setTextColor(getColor(R.color.md_on_container))
         head.addView(title, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val help = ImageButton(this)
-        help.setImageResource(R.drawable.ic_help)
-        help.imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.md_primary))
-        val sel = TypedValue()
-        theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, sel, true)
-        help.setBackgroundResource(sel.resourceId)
-        help.contentDescription = getString(R.string.help)
-        help.tooltipText = getString(R.string.help)
-        help.setOnClickListener { Help.show(this) }
-        val gear = TextView(this)
-        gear.text = "⚙"
-        gear.textSize = 22f
-        gear.gravity = Gravity.CENTER
-        gear.setTextColor(getColor(R.color.md_on_container))
-        gear.contentDescription = getString(R.string.settings_title)
-        gear.setOnClickListener { showSettings() }
-        head.addView(gear, LinearLayout.LayoutParams(dp(44), dp(44)))
-        head.addView(help, LinearLayout.LayoutParams(dp(44), dp(44)))
+        sortBtn = headButton(R.drawable.ic_sort, R.string.sort_title) { showSortDialog(currentPane()) }
+        filterBtn = headButton(R.drawable.ic_filter, R.string.filter_title) { showFilterDialog(currentPane()) }
+        val more = headButton(R.drawable.ic_more, R.string.more) { showMore(it) }
+        head.addView(sortBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        head.addView(filterBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
+        head.addView(more, LinearLayout.LayoutParams(dp(44), dp(44)))
         col.addView(head)
 
         val tabRow = LinearLayout(this)
         tabRow.setPadding(dp(10), dp(4), dp(10), dp(8))
-        val labels = intArrayOf(R.string.tab_folders, R.string.tab_source, R.string.tab_target, R.string.tab_folders)
+        val labels = intArrayOf(R.string.tab_tree_source, R.string.tab_source, R.string.tab_target, R.string.tab_tree_target)
         for (i in labels.indices) {
             val t = TextView(this)
             t.setText(labels[i])
             t.gravity = Gravity.CENTER
             t.textSize = 12f
+            t.maxLines = 1
             t.typeface = Typeface.DEFAULT_BOLD
             t.setOnClickListener { pager.snapTo(i) }
-            val lp = LinearLayout.LayoutParams(0, dp(40), 1f)
+            val lp = LinearLayout.LayoutParams(0, dp(36), 1f)
             lp.setMargins(dp(3), 0, dp(3), 0)
             tabRow.addView(t, lp)
             tabs.add(t)
@@ -492,7 +484,10 @@ class MainActivity : Activity() {
         pager = SnapScroll(this)
         pager.pageWidth = pageW
         pager.pageCount = 4
-        pager.onPage = { setTab(it) }
+        pager.onPage = {
+            setTab(it)
+            updateTools()
+        }
         val strip = LinearLayout(this)
         val pages = arrayOf(
             buildTree(panes[0]), buildFiles(panes[0]), buildFiles(panes[1]), buildTree(panes[1])
@@ -501,17 +496,29 @@ class MainActivity : Activity() {
         pager.addView(strip, ViewGroup.LayoutParams(pageW * 4, ViewGroup.LayoutParams.MATCH_PARENT))
         col.addView(pager, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // Marking bar: count and size with all / invert / clear, then the actions
         bar = LinearLayout(this)
-        bar.gravity = Gravity.CENTER_VERTICAL
+        bar.orientation = LinearLayout.VERTICAL
         bar.setBackgroundColor(getColor(R.color.md_container))
-        bar.setPadding(dp(10), dp(6), dp(10), dp(6))
+        bar.setPadding(dp(8), dp(6), dp(8), dp(8))
+        val top = LinearLayout(this)
+        top.gravity = Gravity.CENTER_VERTICAL
         barCount = TextView(this)
-        barCount.textSize = 12f
+        barCount.textSize = 13f
         barCount.typeface = Typeface.DEFAULT_BOLD
-        bar.addView(barCount, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        bar.addView(actionButton(R.string.copy, 0, null))
-        bar.addView(actionButton(R.string.move, 1, null))
-        bar.addView(actionButton(R.string.delete, 2, ERROR_COLOR))
+        barCount.setTextColor(getColor(R.color.md_on_container))
+        top.addView(barCount, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        top.addView(pill(R.string.sel_all) { markAll(false) })
+        top.addView(pill(R.string.sel_invert) { markAll(true) })
+        top.addView(pill(R.string.sel_clear) { clearMarks() })
+        bar.addView(top)
+        val acts = LinearLayout(this)
+        acts.setPadding(0, dp(6), 0, 0)
+        acts.addView(barAction(R.drawable.ic_copy, R.string.copy, false) { act(0) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        acts.addView(barAction(R.drawable.ic_move, R.string.move, false) { act(1) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        acts.addView(barAction(R.drawable.ic_share, R.string.share, false) { shareSelected() }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        acts.addView(barAction(R.drawable.ic_delete, R.string.delete, true) { act(2) }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        bar.addView(acts)
         bar.visibility = View.GONE
         col.addView(bar)
 
@@ -519,13 +526,116 @@ class MainActivity : Activity() {
         return col
     }
 
-    private fun actionButton(text: Int, which: Int, color: Int?): Button {
-        val b = Button(this)
-        b.setText(text)
-        b.isAllCaps = false
-        if (color != null) b.setTextColor(color)
-        b.setOnClickListener { act(which) }
-        return b
+    /** Side whose page is shown (tree or files). */
+    private fun currentPane(): Pane = panes[if (Math.round(pager.scrollX / pager.pageWidth.toFloat()) < 2) 0 else 1]
+
+    private fun headButton(icon: Int, label: Int, onClick: (View) -> Unit) = ImageButton(this).apply {
+        setImageResource(icon)
+        imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.md_on_container))
+        val sel = TypedValue()
+        theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, sel, true)
+        setBackgroundResource(sel.resourceId)
+        contentDescription = getString(label)
+        tooltipText = getString(label)
+        setOnClickListener { onClick(it) }
+    }
+
+    /** ⋮ in the header: folder actions of the visible side, then settings and help. */
+    private fun showMore(anchor: View) {
+        val p = currentPane()
+        val menu = android.widget.PopupMenu(this, anchor)
+        val isFav = favorites().contains(p.dir.path)
+        menu.menu.add(0, 1, 0, R.string.new_folder).isEnabled = !p.inArchive
+        menu.menu.add(0, 2, 1, if (isFav) R.string.fav_remove else R.string.fav_add).isEnabled = !p.inArchive
+        menu.menu.add(0, 3, 2, R.string.settings_title)
+        menu.menu.add(0, 4, 3, R.string.help)
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> askName(R.string.new_folder, "") { name -> runOp { Transfer.mkdir(this, p.dir, name) } }
+                2 -> {
+                    val favs = HashSet(favorites())
+                    if (isFav) favs.remove(p.dir.path) else favs.add(p.dir.path)
+                    settings.edit().putStringSet("favs", favs).apply()
+                    refreshAll()
+                }
+                3 -> showSettings()
+                4 -> Help.show(this)
+            }
+            true
+        }
+        menu.show()
+    }
+
+    private fun pill(label: Int, onClick: () -> Unit) = TextView(this).apply {
+        setText(label)
+        textSize = 12f
+        setTextColor(getColor(R.color.md_on_container))
+        setPadding(dp(10), dp(4), dp(10), dp(4))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(14).toFloat()
+            setStroke(dp(1), getColor(R.color.md_outline))
+        }
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.marginStart = dp(6) }
+        setOnClickListener { onClick() }
+    }
+
+    /** Button with a symbol above its label (marking bar, menu sheet). */
+    private fun barAction(icon: Int, label: Int, danger: Boolean, onClick: () -> Unit) = TextView(this).apply {
+        setText(label)
+        textSize = 11f
+        maxLines = 1
+        gravity = Gravity.CENTER
+        val fg = if (danger) ERROR_COLOR_LIGHT else getColor(R.color.md_on_container)
+        setTextColor(fg)
+        val d = getDrawable(icon)!!.mutate()
+        d.setTint(fg)
+        setCompoundDrawablesWithIntrinsicBounds(null, d, null, null)
+        compoundDrawablePadding = dp(2)
+        setPadding(dp(2), dp(6), dp(2), dp(6))
+        background = GradientDrawable().apply {
+            cornerRadius = dp(10).toFloat()
+            setColor(if (danger) 0x40B3261E else 0x22FFFFFF)
+        }
+        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.setMargins(dp(3), 0, dp(3), 0) }
+        setOnClickListener { onClick() }
+    }
+
+    /** Marks every entry of the side with marks ([invert]: flips each mark). */
+    private fun markAll(invert: Boolean) {
+        val p = panes.firstOrNull { it.selected.isNotEmpty() } ?: currentPane()
+        val all = p.entries.filter { !it.up }.map { it.file }
+        if (invert) {
+            val now = HashSet(p.selected)
+            p.selected.clear()
+            all.filterTo(p.selected) { it !in now }
+        } else p.selected.addAll(all)
+        refreshSelection()
+    }
+
+    private fun clearMarks() {
+        for (p in panes) p.selected.clear()
+        refreshSelection()
+    }
+
+    /**
+     * Primary and tertiary come from the wallpaper and can be almost the same colour. Then the target side
+     * gets the opposite hue of the primary (same lightness), so source and target always differ.
+     */
+    private fun targetColors(): Pair<Int, Int> {
+        val primary = getColor(R.color.md_primary)
+        val tertiary = getColor(R.color.md_tertiary)
+        val onTertiary = getColor(R.color.md_on_tertiary)
+        val a = FloatArray(3).also { Color.colorToHSV(primary, it) }
+        val b = FloatArray(3).also { Color.colorToHSV(tertiary, it) }
+        val d = Math.abs(a[0] - b[0]).let { minOf(it, 360 - it) }
+        if (d >= 45f && b[1] > 0.12f) return Pair(tertiary, onTertiary)
+        fun turn(c: Int): Int {
+            val h = FloatArray(3).also { Color.colorToHSV(c, it) }
+            h[0] = (a[0] + 160f) % 360f
+            h[1] = maxOf(h[1], 0.25f)
+            return Color.HSVToColor(h)
+        }
+        return Pair(turn(primary), turn(getColor(R.color.md_on_primary)))
     }
 
     /** Coloured band: storage chooser (fixed) and the path (right-aligned, the current folder always visible). */
@@ -547,6 +657,19 @@ class MainActivity : Activity() {
         }
         val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         lp.setMargins(dp(6), dp(4), dp(2), dp(4))
+        // Q / Z (S / T) tells the sides apart, also for colour-blind eyes
+        val badge = TextView(this).apply {
+            setText(if (p === panes[0]) R.string.badge_source else R.string.badge_target)
+            textSize = 12f
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            setTextColor(p.onColor)
+            background = GradientDrawable().apply {
+                cornerRadius = dp(6).toFloat()
+                setColor(0x2E000000)
+            }
+        }
+        row.addView(badge, LinearLayout.LayoutParams(dp(24), dp(24)).also { it.marginStart = dp(6) })
         row.addView(p.location, lp)
         p.fileBand = CrumbBar(this)
         row.addView(p.fileBand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
@@ -625,18 +748,12 @@ class MainActivity : Activity() {
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
         page.addView(band(p))
-        val chips = LinearLayout(this)
-        chips.setPadding(dp(6), dp(6), dp(6), dp(6))
-        p.sortChip = chip { showSortDialog(p) }
-        p.filterChip = chip { showFilterDialog(p) }
-        val lp = { LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).also { it.setMargins(dp(3), 0, dp(3), 0) } }
-        chips.addView(p.sortChip, lp())
-        chips.addView(p.filterChip, lp())
-        val more = chip { showFolderMenu(p) }
-        more.text = "⋮"
-        more.contentDescription = getString(R.string.folder_menu)
-        chips.addView(more, LinearLayout.LayoutParams(dp(44), ViewGroup.LayoutParams.WRAP_CONTENT).also { it.setMargins(dp(3), 0, dp(3), 0) })
-        page.addView(chips)
+        // Thin bar while a folder is read (shown only when it takes a moment, e.g. network)
+        p.loading = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            isIndeterminate = true
+            visibility = View.INVISIBLE
+        }
+        page.addView(p.loading, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(4)))
         val list = PanList(this)
         styledList(list)
         p.fileList = list
@@ -662,7 +779,17 @@ class MainActivity : Activity() {
             }
             true
         }
-        page.addView(list, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        val stack = FrameLayout(this)
+        stack.addView(list)
+        p.emptyView = TextView(this).apply {
+            setText(R.string.empty_folder)
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setTextColor(getColor(R.color.md_on_surface_variant))
+            visibility = View.GONE
+        }
+        stack.addView(p.emptyView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER))
+        page.addView(stack, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         page.addView(rangeBar(list), LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(14)))
         return page
     }
@@ -690,35 +817,31 @@ class MainActivity : Activity() {
     private fun setTab(active: Int) {
         for (i in tabs.indices) {
             val on = i == active
-            val color = if (i < 2) getColor(R.color.md_primary) else getColor(R.color.md_tertiary)
+            val color = panes[if (i < 2) 0 else 1].color
             val bg = GradientDrawable()
             bg.cornerRadius = dp(8).toFloat()
             bg.setColor(if (on) color else getColor(R.color.md_container))
             tabs[i].background = bg
-            val onColor = if (i < 2) getColor(R.color.md_on_primary) else getColor(R.color.md_on_tertiary)
+            val onColor = panes[if (i < 2) 0 else 1].onColor
             tabs[i].setTextColor(if (on) onColor else getColor(R.color.md_on_container))
         }
     }
 
-    private fun chip(onClick: () -> Unit) = TextView(this).apply {
-        textSize = 12f
-        maxLines = 1
-        ellipsize = TextUtils.TruncateAt.END
-        gravity = Gravity.CENTER
-        setPadding(dp(8), dp(8), dp(8), dp(8))
-        setTextColor(getColor(R.color.md_on_container))
-        background = GradientDrawable().apply {
-            cornerRadius = dp(8).toFloat()
-            setColor(getColor(R.color.md_container))
-        }
         setOnClickListener { onClick() }
     }
 
-    private fun updateChips(p: Pane) {
+    /** Sort / filter symbols in the header show the state of the visible side (filter coloured when active). */
+    private fun updateTools() {
+        if (!::sortBtn.isInitialized) return
+        val p = currentPane()
         val arrow = if (p.sortDesc) "↓" else "↑"
-        p.sortChip.text = getString(R.string.chip_sort, getString(p.sortBy.label), arrow)
+        sortBtn.tooltipText = getString(R.string.chip_sort, getString(p.sortBy.label), arrow)
+        sortBtn.contentDescription = sortBtn.tooltipText
         val name = if (p.nameQuery.isEmpty()) "" else " · \"${p.nameQuery}\""
-        p.filterChip.text = getString(R.string.chip_filter, getString(p.filter.label), name)
+        filterBtn.tooltipText = getString(R.string.chip_filter, getString(p.filter.label), name)
+        filterBtn.contentDescription = filterBtn.tooltipText
+        val active = p.filter != Filter.ALL || p.nameQuery.isNotEmpty()
+        filterBtn.imageTintList = android.content.res.ColorStateList.valueOf(if (active) p.color else getColor(R.color.md_on_container))
     }
 
     // ---- State ----
@@ -771,10 +894,18 @@ class MainActivity : Activity() {
         }
     }
 
+    /** "Folder is empty", or "nothing matches the filter" when the filter hides everything. */
+    private fun updateEmpty(p: Pane) {
+        val empty = p.entries.none { !it.up }
+        p.emptyView.setText(if (p.raw.none { !it.up }) R.string.empty_folder else R.string.empty_filter)
+        p.emptyView.visibility = if (empty) View.VISIBLE else View.GONE
+    }
+
     private fun applyView(p: Pane) {
         p.entries = viewOf(p)
+        updateEmpty(p)
         p.fileAdapter.notifyDataSetChanged()
-        updateChips(p)
+        updateTools()
         p.fileList.requestLayout()
     }
 
@@ -959,6 +1090,8 @@ class MainActivity : Activity() {
         val favs = favorites().sorted()
         p.inArchive = Archive.inside(dir)
         updateCrumbs(p)
+        // The loading bar only appears if reading takes longer than a blink
+        p.loading.postDelayed({ if (gen == p.gen && p.loading.tag != gen) p.loading.visibility = View.VISIBLE }, 300)
         loader.execute {
             val nodes = buildNodes(expanded, favs)
             val virtual = Vfs.isVirtual(dir) || Archive.inside(dir)
@@ -966,6 +1099,9 @@ class MainActivity : Activity() {
             val entries = buildEntries(dir, showUp)
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
+                p.loading.tag = gen
+                p.loading.visibility = View.INVISIBLE
+                updateEmpty(p)
                 Net.lastError?.let {
                     Net.lastError = null
                     Toast.makeText(this, getString(R.string.net_error, it), Toast.LENGTH_LONG).show()
@@ -973,7 +1109,7 @@ class MainActivity : Activity() {
                 p.nodes = nodes
                 p.raw = entries
                 p.entries = viewOf(p)
-                updateChips(p)
+                updateTools()
                 p.treeList.contentWidth = nodes.maxOfOrNull { it.width + dp(40) } ?: 0f
                 p.fileList.contentWidth = entries.maxOfOrNull { it.width } ?: 0f
                 p.treeAdapter.notifyDataSetChanged()
@@ -1002,7 +1138,10 @@ class MainActivity : Activity() {
     private fun updateBar() {
         val active = panes.firstOrNull { it.selected.isNotEmpty() }
         bar.visibility = if (active == null) View.GONE else View.VISIBLE
-        barCount.text = getString(R.string.selected_count, active?.selected?.size ?: 0)
+        if (active == null) return
+        val files = active.entries.filter { !it.up && !it.isDir && it.file in active.selected }
+        val size = Formatter.formatShortFileSize(this, files.sumOf { it.size })
+        barCount.text = getString(R.string.selected_size, active.selected.size, size)
     }
 
     /** Item count of a folder: null while it is being counted on the counter thread. */
@@ -1031,84 +1170,147 @@ class MainActivity : Activity() {
 
     // ---- Actions ----
 
-    /** Menu for the held [file]: "Open with" (files only), then copy / move / delete for the marked items. */
+    /**
+     * Menu for the held entry as a sheet from the bottom: name and size, the frequent actions as symbols,
+     * the rest grouped; only what fits the entry is offered (archive, picture, printable …).
+     */
     private fun showMenu(file: File, isDir: Boolean) {
-        if (Archive.inside(file.parentFile ?: file) && !Archive.isArchive(file)) {
-            // Inside an archive: read-only, the marked entries can only be unpacked
-            val items = if (isDir) arrayOf(getString(R.string.arc_extract)) else arrayOf(getString(R.string.arc_extract), getString(R.string.view_open))
-            AlertDialog.Builder(this)
-                .setItems(items) { _, which -> if (which == 0) act(0) else viewFile(file) }
-                .show()
-            return
-        }
-        val labels = ArrayList<String>()
-        val actions = ArrayList<Int>()
+        val inArchive = Archive.inside(file.parentFile ?: file) && !Archive.isArchive(file)
         val mime = FileOps.mime(file)
+        val dialog = android.app.Dialog(this)
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        col.setPadding(dp(12), dp(8), dp(12), dp(16))
+        col.background = GradientDrawable().apply {
+            val r = dp(24).toFloat()
+            cornerRadii = floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
+            setColor(getColor(R.color.md_surface))
+        }
+        col.addView(View(this).apply {
+            background = GradientDrawable().apply { cornerRadius = dp(2).toFloat(); setColor(getColor(R.color.md_outline)) }
+        }, LinearLayout.LayoutParams(dp(36), dp(4)).also { it.gravity = Gravity.CENTER_HORIZONTAL; it.bottomMargin = dp(12) })
+
+        // Head: icon, name, size and date (or how many more are marked)
+        val head = LinearLayout(this)
+        head.gravity = Gravity.CENTER_VERTICAL
+        val ext = if (isDir) "" else file.extension.lowercase().take(4)
+        val (fill, text) = if (isDir) Pair(FOLDER_YELLOW, Color.WHITE) else VividColors.colorsFor(file.extension.lowercase())
+        head.addView(ImageView(this).apply { setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, false, 0)) }, LinearLayout.LayoutParams(dp(34), dp(40)))
+        val texts = LinearLayout(this)
+        texts.orientation = LinearLayout.VERTICAL
+        texts.setPadding(dp(12), 0, 0, 0)
+        texts.addView(TextView(this).apply {
+            this.text = file.name
+            textSize = 15f
+            maxLines = 2
+            ellipsize = TextUtils.TruncateAt.MIDDLE
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(getColor(R.color.md_on_surface))
+        })
+        val n = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.size ?: 0
+        val meta = panes.flatMap { it.entries }.firstOrNull { it.file == file && !it.isDir }?.meta ?: ""
+        val more = if (n > 1) getString(R.string.menu_more_marked, n - 1) else ""
+        texts.addView(TextView(this).apply {
+            this.text = listOf(meta, more).filter { it.isNotEmpty() }.joinToString(" · ")
+            textSize = 12f
+            setTextColor(getColor(R.color.md_on_surface_variant))
+        })
+        head.addView(texts, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        col.addView(head)
+
+        fun go(code: Int) {
+            dialog.dismiss()
+            runAction(code, file, mime)
+        }
+        val quick = LinearLayout(this)
+        quick.setPadding(0, dp(12), 0, dp(4))
+        fun q(icon: Int, label: Int, code: Int, danger: Boolean = false) = quick.addView(barAction(icon, label, danger) { go(code) })
+        if (inArchive) {
+            q(R.drawable.ic_unarchive, R.string.arc_extract, 0)
+        } else {
+            q(R.drawable.ic_copy, R.string.copy, 0)
+            q(R.drawable.ic_move, R.string.move, 1)
+            if (!isDir) q(R.drawable.ic_share, R.string.share, 4)
+            q(R.drawable.ic_edit, R.string.rename, 6)
+            q(R.drawable.ic_delete, R.string.delete, 2, true)
+        }
+        col.addView(quick)
+
+        fun group(title: Int) = col.addView(TextView(this).apply {
+            setText(title)
+            textSize = 11f
+            isAllCaps = true
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(panes[0].color)
+            setPadding(dp(6), dp(12), 0, dp(2))
+        })
+        fun entry(label: Int, code: Int) = col.addView(TextView(this).apply {
+            setText(label)
+            textSize = 15f
+            setTextColor(getColor(R.color.md_on_surface))
+            setPadding(dp(6), dp(10), dp(6), dp(10))
+            val sel = TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackground, sel, true)
+            setBackgroundResource(sel.resourceId)
+            setOnClickListener { go(code) }
+        })
         if (!isDir) {
-            labels.add(getString(R.string.open_with))
-            actions.add(3)
-            labels.add(getString(R.string.view_open))
-            actions.add(9)
-            labels.add(getString(R.string.share))
-            actions.add(4)
-            if (FilePrint.canPrint(mime)) {
-                labels.add(getString(R.string.print))
-                actions.add(5)
+            group(R.string.menu_open)
+            if (!inArchive) entry(R.string.open_with, 3)
+            entry(R.string.view_open, 9)
+            if (!inArchive && FilePrint.canPrint(mime)) entry(R.string.print, 5)
+        }
+        if (!inArchive) {
+            group(R.string.menu_archive)
+            if (!isDir && Archive.isArchiveName(file)) entry(R.string.arc_extract, 7)
+            entry(R.string.arc_zip, 8)
+            if (selectedOr(file).any { Webp.canConvert(it) }) {
+                group(R.string.menu_picture)
+                entry(R.string.webp_copy, 10)
+                entry(R.string.webp_convert, 11)
             }
         }
-        labels.add(getString(R.string.rename))
-        actions.add(6)
-        if (!isDir && Archive.isArchiveName(file)) {
-            labels.add(getString(R.string.arc_extract))
-            actions.add(7)
+
+        val scroll = ScrollView(this)
+        scroll.addView(col)
+        dialog.setContentView(scroll)
+        dialog.window?.apply {
+            setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+            setGravity(Gravity.BOTTOM)
+            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         }
-        labels.add(getString(R.string.arc_zip))
-        actions.add(8)
-        if (selectedOr(file).any { Webp.canConvert(it) }) {
-            labels.add(getString(R.string.webp_copy))
-            actions.add(10)
-            labels.add(getString(R.string.webp_convert))
-            actions.add(11)
-        }
-        labels.add(getString(R.string.copy_to_target))
-        actions.add(0)
-        labels.add(getString(R.string.move_to_target))
-        actions.add(1)
-        labels.add(getString(R.string.delete))
-        actions.add(2)
-        val n = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.size ?: 0
-        AlertDialog.Builder(this)
-            .setTitle(getString(R.string.selected_count, n))
-            .setItems(labels.toTypedArray()) { _, which ->
-                when (actions[which]) {
-                    3 -> withLocal(listOf(file)) { openWith(it[0]) }
-                    4 -> shareSelected()
-                    5 -> withLocal(listOf(file)) { FilePrint.print(this, uriFor(it[0]), file.name, mime ?: "*/*") }
-                    6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
-                    7 -> askExtract(file, listOf(""))
-                    9 -> viewFile(file)
-                    10 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, false)
-                    11 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, true)
-                    8 -> {
-                        val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
-                        if (Archive.inside(targetDir())) {
-                            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
-                            return@setItems
-                        }
-                        val base = if (items.size == 1) items[0].nameWithoutExtension.ifEmpty { items[0].name } else getString(R.string.arc_default)
-                        askName(R.string.arc_zip, "$base.zip") { name ->
-                            val dst = targetDir()
-                            resolveClashes(dst, listOf(name)) { m ->
-                                if (m[name] != Clash.SKIP) {
-                                    runArchive(R.string.arc_packing) { pr -> Archive.zip(this, items, dst, name, m[name] == Clash.OVERWRITE, pr) }
-                                }
-                            }
+        dialog.show()
+    }
+
+    /** Actions of the menu sheet; 0-2 copy / move / delete (to the other side), the rest for [file]. */
+    private fun runAction(code: Int, file: File, mime: String?) {
+        when (code) {
+            3 -> withLocal(listOf(file)) { openWith(it[0]) }
+            4 -> shareSelected()
+            5 -> withLocal(listOf(file)) { FilePrint.print(this, uriFor(it[0]), file.name, mime ?: "*/*") }
+            6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
+            7 -> askExtract(file, listOf(""))
+            9 -> viewFile(file)
+            10 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, false)
+            11 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) }, true)
+            8 -> {
+                val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
+                if (Archive.inside(targetDir())) {
+                    Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+                    return
+                }
+                val base = if (items.size == 1) items[0].nameWithoutExtension.ifEmpty { items[0].name } else getString(R.string.arc_default)
+                askName(R.string.arc_zip, "$base.zip") { name ->
+                    val dst = targetDir()
+                    resolveClashes(dst, listOf(name)) { m ->
+                        if (m[name] != Clash.SKIP) {
+                            runArchive(R.string.arc_packing) { pr -> Archive.zip(this, items, dst, name, m[name] == Clash.OVERWRITE, pr) }
                         }
                     }
-                    else -> act(actions[which])
                 }
             }
-            .show()
+            else -> act(code)
+        }
     }
 
     /** [which]: 0 copy, 1 move, 2 delete; source is the pane with a selection, target the other one. */
@@ -1171,30 +1373,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Menu of the pane's folder (chip ⋮): new folder, favourite on/off. */
-    private fun showFolderMenu(p: Pane) {
-        val dir = p.dir
-        if (p.inArchive) {
-            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
-            return
-        }
-        val isFav = favorites().contains(dir.path)
-        val items = arrayOf(getString(R.string.new_folder), getString(if (isFav) R.string.fav_remove else R.string.fav_add))
-        AlertDialog.Builder(this)
-            .setTitle(allRoots().firstOrNull { it.path == dir.path }?.let { rootName(it) } ?: dir.name)
-            .setItems(items) { _, which ->
-                if (which == 0) {
-                    askName(R.string.new_folder, "") { name -> runOp { Transfer.mkdir(this, dir, name) } }
-                } else {
-                    val favs = HashSet(favorites())
-                    if (isFav) favs.remove(dir.path) else favs.add(dir.path)
-                    settings.edit().putStringSet("favs", favs).apply()
-                    refreshAll()
-                }
-            }
-            .setNegativeButton(R.string.cancel, null)
-            .show()
-    }
 
     /** Asks for a file or folder name; [onName] gets the trimmed, non-empty input. */
     private fun askName(title: Int, initial: String, onName: (String) -> Unit) {
@@ -1778,7 +1956,7 @@ class MainActivity : Activity() {
             val thumb = if (!isDir && showThumbs && !p.inArchive && Thumbs.canPreview(f)) {
                 Thumbs.get(this@MainActivity, f, e.modified) { for (q in panes) q.fileAdapter.notifyDataSetChanged() }
             } else null
-            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, text, thumb))
+            row.icon.setImageDrawable(EntryIcon(ext.uppercase(), isDir, fill, text, sel, p.color, appBitmap, text, thumb, p.onColor))
             row.iconHit.visibility = if (e.up) View.INVISIBLE else View.VISIBLE
             row.iconHit.setOnClickListener { toggle(p, f) }
 

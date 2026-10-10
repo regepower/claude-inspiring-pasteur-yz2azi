@@ -1,19 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name" translatable="false">DualFiles</string>
-    <string name="tab_folders">Folders</string>
     <string name="tab_source">Source</string>
     <string name="tab_target">Target</string>
     <string name="band_source">Source</string>
     <string name="band_target">Target</string>
     <string name="up" translatable="false">..</string>
     <string name="items_count">%1$d items</string>
-    <string name="selected_count">%1$d selected</string>
     <string name="copy">Copy</string>
     <string name="move">Move</string>
     <string name="delete">Delete</string>
-    <string name="copy_to_target">Copy to target</string>
-    <string name="move_to_target">Move to target</string>
     <string name="delete_confirm">Delete %1$d items permanently?</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>
@@ -46,15 +42,15 @@
         <item>Access and privacy</item>
     </string-array>
     <string-array name="help_bodies">
-        <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move, unpack and pack always go from the marked side to the other side.</item>
+        <item>Swipe left and right (or tap the tabs): Tree S (folder tree of the source), Source (its files), Target, Tree T. Source and target have different colours and the letter S or T in the band. Copy, move, unpack and pack always go from the marked side to the other side.</item>
         <item>Tap a row to open it: a folder opens in the list, a file in its app. A file\'s icon shows the app that opens it; pictures and videos show a preview. \"..\" goes one folder up, so does the back key. Marking: tap the icon on the left (or hold the row), a check appears. While something is marked, tapping a row marks it too instead of opening it; once nothing is marked, a tap opens again. Drag sideways with two fingers to scroll long names.</item>
-        <item>Hold a row: menu with open with, view (text/hex), share, print, rename, unpack ZIP/7z, pack as ZIP, copy pictures as WebP to the target or convert them to WebP here (the original is deleted only after the conversion worked), copy, move, delete. Marked items also have buttons at the bottom. Installing an APK needs the permission \"Install unknown apps\" once.</item>
-        <item>Tap the arrow to unfold a folder, tap the name to open it on the next page. Chip ⋮ above the list: new folder, add the folder to the favourites or remove it (favourites are at the top of the tree with ★). The Sort and Filter chips order and filter the list (name, date, size, type; pictures, videos, documents, name contains …).</item>
+        <item>Hold a row to open a sheet at the bottom: name and size, then symbols for copy, move, share, rename and delete, then depending on the file open with, view (text/hex), print, unpack ZIP/7z, pack as ZIP, and copy pictures as WebP to the target or convert them to WebP here (the original is deleted only after the conversion worked). With marked items, the bar at the bottom shows count and size, All, Invert, Clear and the actions. Installing an APK needs the permission \"Install unknown apps\" once.</item>
+        <item>Tap the arrow to unfold a folder, tap the name to open it on the next page. Top right: sort (name, date, size, type, ascending or descending) and filter (pictures, videos, documents, name contains …; the symbol is coloured while a filter is on) – both apply to the side that is shown. ⋮ top right: new folder, add the folder to the favourites or remove it (favourites are at the top of the tree with ★), settings, help.</item>
         <item>The field on the left of the coloured band (e.g. \"Internal ▾\") picks the storage: internal, SD card, USB, cloud folders of other apps (☁, e.g. Google Drive, via \"Add cloud / drive\") and network servers (🌐). Network servers: FTP, FTPS or WebDAV (e.g. Nextcloud with start folder remote.php/dav/files/NAME); \"Search in Wi-Fi\" finds servers that announce themselves. The connection is tested before saving, passwords are stored encrypted. Files from a server are loaded first to open them. The path is on the right of the band, every part can be tapped.</item>
         <item>A ZIP or 7z archive opens like a folder with one tap (read-only), also in the tree. Mark entries and copy (or hold → unpack): only these are unpacked, into a folder named after the archive or directly into the target. Tap a file inside to open it. Password-protected archives are not supported.</item>
         <item>View (text/hex) opens even very large files at once. One finger scrolls both ways, two fingers zoom the text. Hold a word to mark it, the round handles extend the mark; then copy, share or all. Top right switches between text and hex. Back first removes a mark.</item>
         <item>If a name already exists in the target, the app asks: overwrite (folders are merged), skip or keep both (\"name (1)\"), optionally for all. Copy, move, delete, pack and unpack show their progress and can be cancelled; a half-copied file is removed.</item>
-        <item>Gear ⚙: fixed app per file type (change or delete), add or remove cloud folders, show hidden files, previews on/off, save and load the configuration (app choices, favourites, settings), error report (last crash or hang, to copy or share).</item>
+        <item>⋮ top right → Settings: fixed app per file type (change or delete), add or remove cloud folders, show hidden files, previews on/off, save and load the configuration (app choices, favourites, settings), error report (last crash or hang, to copy or share).</item>
         <item>The app needs \"all files access\"; the system setting opens on first start. No data is collected or sent. The app only goes online to servers you added yourself.</item>
     </string-array>
     <string name="open_with">Open with…</string>
@@ -100,7 +96,6 @@
     <string name="op_failed">Did not work</string>
     <string name="fav_add">Add to favourites</string>
     <string name="fav_remove">Remove from favourites</string>
-    <string name="folder_menu">Folder</string>
     <string name="hidden_show">Show hidden files</string>
     <string name="hidden_hide">Hide hidden files</string>
     <string name="thumbs_on">Show previews of pictures and videos</string>
@@ -175,4 +170,19 @@
     <string name="net_found">Found servers</string>
     <string name="net_add">+ Network server (FTP / WebDAV)…</string>
     <string name="net_loading">Loading from the server…</string>
+    <string name="tab_tree_source">Tree S</string>
+    <string name="tab_tree_target">Tree T</string>
+    <string name="more">More</string>
+    <string name="sel_all">All</string>
+    <string name="sel_invert">Invert</string>
+    <string name="sel_clear">Clear</string>
+    <string name="selected_size">%1$d marked · %2$s</string>
+    <string name="empty_folder">Folder is empty</string>
+    <string name="empty_filter">Nothing matches the filter</string>
+    <string name="badge_source">S</string>
+    <string name="badge_target">T</string>
+    <string name="menu_more_marked">+ %1$d more marked</string>
+    <string name="menu_open">Open</string>
+    <string name="menu_archive">Archive</string>
+    <string name="menu_picture">Picture</string>
 </resources>

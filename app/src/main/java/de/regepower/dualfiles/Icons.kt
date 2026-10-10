@@ -177,6 +177,7 @@ internal class EntryIcon(
     private val appBadge: Bitmap? = null,
     private val appTint: Int = 0,
     private val thumb: Bitmap? = null,
+    private val checkColor: Int = Color.WHITE,
 ) : Drawable() {
 
     override fun draw(canvas: Canvas) {
@@ -227,6 +228,7 @@ internal class EntryIcon(
                 lineTo(cx - 1f, cy + 2.8f)
                 lineTo(cx + 3.8f, cy - 2.8f)
             }
+            checkPaint.color = checkColor
             canvas.drawPath(check, checkPaint)
         }
         canvas.restore()
