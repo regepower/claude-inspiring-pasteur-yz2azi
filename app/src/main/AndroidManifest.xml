@@ -30,6 +30,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ViewerActivity"
+            android:exported="false" />
         <!-- Receives the app picked in the chooser so it is remembered per file type. -->
         <receiver
             android:name=".ChooserReceiver"

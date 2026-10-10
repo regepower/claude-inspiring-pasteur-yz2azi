@@ -6,7 +6,7 @@ Dual-pane file manager for Android, portrait only. Four pages, swipe left/right:
 
 - Tap a row = open (folder in the list, file in its default app). Mark only with the check box on the left.
 - Icon of a file = icon of the app that opens it.
-- Hold a row = menu: open with / share / print / rename / unpack ZIP or 7z / pack as ZIP / copy / move / delete (to the other side).
+- Hold a row = menu: open with / share / print / view as text or hex / rename / unpack ZIP or 7z / pack as ZIP / copy / move / delete (to the other side).
 - Chip ⋮ above the list: new folder, favourite on/off (favourites at the top of the tree).
 - Settings ⚙: file associations, Saf folders (Drive etc.), hidden files, previews, save/load configuration.
 - Two fingers dragging sideways = scroll all long names; icons and check boxes stay. One finger swipes the pages.

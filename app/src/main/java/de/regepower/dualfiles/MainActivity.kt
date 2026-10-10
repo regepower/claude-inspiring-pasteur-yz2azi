@@ -64,7 +64,7 @@ private const val REQ_TREE = 1
 private const val REQ_SAVE = 2
 private const val REQ_LOAD = 3
 
-private fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
+internal fun Context.dp(v: Int): Int = (v * resources.displayMetrics.density + 0.5f).toInt()
 
 private enum class SortBy(val label: Int) { NAME(R.string.sort_name), DATE(R.string.sort_date), SIZE(R.string.sort_size), TYPE(R.string.sort_type) }
 
@@ -120,7 +120,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
 }
 
 /** A list row whose name can be moved sideways; [clip] is the visible part of the name. */
-private interface NameRow {
+internal interface NameRow {
     val clip: View
     val content: View
 }
@@ -129,7 +129,7 @@ private interface NameRow {
  * ListView with one shared sideways offset for all names. A two-finger drag moves it; one finger
  * keeps scrolling the list and swiping the pages. [onRange] tells the scroll bar about the range.
  */
-private class PanList(context: Context) : ListView(context) {
+internal class PanList(context: Context) : ListView(context) {
     var contentWidth = 0f          // widest name of the list in px
     var offset = 0                 // px, the same for every visible row
     var onRange: ((Int, Int, Int) -> Unit)? = null
@@ -214,11 +214,22 @@ private class PanList(context: Context) : ListView(context) {
     }
 }
 
+/** Clip area of a row: its child gets its full width (not the clip's), so a sideways shift shows the rest. */
+internal class WideClip(ctx: Context) : FrameLayout(ctx) {
+    override fun measureChildWithMargins(child: View, wSpec: Int, wUsed: Int, hSpec: Int, hUsed: Int) {
+        val lp = child.layoutParams as MarginLayoutParams
+        child.measure(
+            MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED),
+            getChildMeasureSpec(hSpec, paddingTop + paddingBottom + lp.topMargin + lp.bottomMargin + hUsed, lp.height)
+        )
+    }
+}
+
 private class TreeRow(ctx: Context) : LinearLayout(ctx), NameRow {
     val chevron = TextView(ctx)
     val icon = ImageView(ctx)
     val label = TextView(ctx)
-    override val clip = FrameLayout(ctx)
+    override val clip = WideClip(ctx)
     override val content: View get() = label
 
     init {
@@ -241,7 +252,7 @@ private class TreeRow(ctx: Context) : LinearLayout(ctx), NameRow {
 private class FileRow(ctx: Context) : LinearLayout(ctx), NameRow {
     val iconHit = FrameLayout(ctx)     // the icon is the check box: tap = mark, rest of the row = open
     val icon = ImageView(ctx)
-    override val clip = FrameLayout(ctx)
+    override val clip = WideClip(ctx)
     val inner = LinearLayout(ctx)
     override val content: View get() = inner
     val name = TextView(ctx)
@@ -892,8 +903,9 @@ class MainActivity : Activity() {
     private fun showMenu(file: File, isDir: Boolean) {
         if (Archive.inside(file.parentFile ?: file) && !Archive.isArchive(file)) {
             // Inside an archive: read-only, the marked entries can only be unpacked
+            val items = if (isDir) arrayOf(getString(R.string.arc_extract)) else arrayOf(getString(R.string.arc_extract), getString(R.string.view_open))
             AlertDialog.Builder(this)
-                .setItems(arrayOf(getString(R.string.arc_extract))) { _, _ -> act(0) }
+                .setItems(items) { _, which -> if (which == 0) act(0) else viewFile(file) }
                 .show()
             return
         }
@@ -903,6 +915,8 @@ class MainActivity : Activity() {
         if (!isDir) {
             labels.add(getString(R.string.open_with))
             actions.add(3)
+            labels.add(getString(R.string.view_open))
+            actions.add(9)
             labels.add(getString(R.string.share))
             actions.add(4)
             if (FilePrint.canPrint(mime)) {
@@ -934,6 +948,7 @@ class MainActivity : Activity() {
                     5 -> FilePrint.print(this, uriFor(file), file.name, mime ?: "*/*")
                     6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
                     7 -> askExtract(file, listOf(""))
+                    9 -> viewFile(file)
                     8 -> {
                         val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
                         if (Archive.inside(targetDir())) {
@@ -1054,6 +1069,29 @@ class MainActivity : Activity() {
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
+    }
+
+    /** Text/hex viewer: local files directly, Saf files through their uri, archive entries via the cache. */
+    private fun viewFile(f: File) {
+        val i = Intent(this, ViewerActivity::class.java).putExtra(ViewerActivity.EXTRA_NAME, f.name)
+        val arc = Archive.split(f)
+        when {
+            arc != null && arc.second.isNotEmpty() -> Thread {
+                val copy = Archive.extractForView(this, arc.first, arc.second)
+                runOnUiThread {
+                    if (copy != null) startActivity(i.putExtra(ViewerActivity.EXTRA_PATH, copy.path))
+                    else Toast.makeText(this, R.string.arc_read, Toast.LENGTH_SHORT).show()
+                }
+            }.start()
+            Saf.isSaf(f) -> Thread {
+                val uri = Saf.docUri(this, f)
+                runOnUiThread {
+                    if (uri != null) startActivity(i.putExtra(ViewerActivity.EXTRA_URI, uri.toString()))
+                    else Toast.makeText(this, R.string.view_error, Toast.LENGTH_SHORT).show()
+                }
+            }.start()
+            else -> startActivity(i.putExtra(ViewerActivity.EXTRA_PATH, f.path))
+        }
     }
 
     /** Tap on a file inside an archive: unpacked to the cache, then opened like any file. */
