@@ -7,6 +7,7 @@
     <color name="md_surface">#1A1C1E</color>
     <color name="md_outline">#8F9099</color>
     <color name="md_tertiary">#EFB8C8</color>
+    <color name="md_on_tertiary">#4A2532</color>
     <color name="md_tertiary_container">#633B48</color>
     <color name="md_error_container">#93000A</color>
     <color name="md_on_error_container">#FFDAD6</color>

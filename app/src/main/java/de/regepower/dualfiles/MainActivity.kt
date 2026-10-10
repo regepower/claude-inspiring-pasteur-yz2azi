@@ -98,6 +98,7 @@ private class Entry(
 
 /** One side (source or target): current folder, selection, tree state. */
 private class Pane(val color: Int, val bandRes: Int, var dir: File) {
+    var onColor = Color.WHITE            // text on [color]: dark on light pastel colours (Material You "on" colour)
     val selected = LinkedHashSet<File>()
     val expanded = HashSet<String>()
     var nodes: List<Node> = emptyList()
@@ -339,13 +340,27 @@ class MainActivity : Activity() {
         panes = arrayOf(
             Pane(getColor(R.color.md_primary), R.string.band_source, if (download.isDirectory) download else primary).also {
                 it.treePage = 0
+                it.onColor = getColor(R.color.md_on_primary)
                 it.filePage = 1
             },
             Pane(getColor(R.color.md_tertiary), R.string.band_target, primary).also {
                 it.treePage = 3
+                it.onColor = getColor(R.color.md_on_tertiary)
                 it.filePage = 2
             }
         )
+        // Back from another app the activity may have been recreated (or the process ended): restore folders,
+        // marks, sorting and filter, so a file opened by mistake does not cost the selection
+        savedInstanceState?.let { b ->
+            for ((i, p) in panes.withIndex()) {
+                b.getString("dir$i")?.let { p.dir = File(it) }
+                b.getStringArray("sel$i")?.forEach { p.selected.add(File(it)) }
+                p.sortBy = SortBy.values().getOrNull(b.getInt("sort$i")) ?: p.sortBy
+                p.sortDesc = b.getBoolean("desc$i")
+                p.filter = Filter.values().getOrNull(b.getInt("filter$i")) ?: p.filter
+                p.nameQuery = b.getString("query$i") ?: ""
+            }
+        }
         for (p in panes) expandTo(p, p.dir)
         showHidden = settings.getBoolean("hidden", false)
         showThumbs = settings.getBoolean("thumbs", true)
@@ -362,10 +377,29 @@ class MainActivity : Activity() {
         root.addView(mainView)
         root.addView(permView)
         setContentView(root)
+        savedInstanceState?.getInt("page")?.let { page ->
+            pager.post {
+                pager.scrollTo(page * pager.pageWidth, 0)
+                setTab(page)
+            }
+        }
         // Android 13+ delivers back through the dispatcher (predictive back); older versions use onBackPressed().
         if (Build.VERSION.SDK_INT >= 33) {
             onBackInvokedDispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT) { handleBack() }
         }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        for ((i, p) in panes.withIndex()) {
+            outState.putString("dir$i", p.dir.path)
+            outState.putStringArray("sel$i", p.selected.map { it.path }.toTypedArray())
+            outState.putInt("sort$i", p.sortBy.ordinal)
+            outState.putBoolean("desc$i", p.sortDesc)
+            outState.putInt("filter$i", p.filter.ordinal)
+            outState.putString("query$i", p.nameQuery)
+        }
+        if (::pager.isInitialized) outState.putInt("page", Math.round(pager.scrollX / pager.pageWidth.toFloat()))
     }
 
     @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
@@ -503,7 +537,7 @@ class MainActivity : Activity() {
             textSize = 13f
             maxLines = 1
             typeface = Typeface.DEFAULT_BOLD
-            setTextColor(Color.WHITE)
+            setTextColor(p.onColor)
             setPadding(dp(10), dp(8), dp(10), dp(8))
             background = GradientDrawable().apply {
                 cornerRadius = dp(8).toFloat()
@@ -659,7 +693,8 @@ class MainActivity : Activity() {
             bg.cornerRadius = dp(8).toFloat()
             bg.setColor(if (on) color else getColor(R.color.md_container))
             tabs[i].background = bg
-            tabs[i].setTextColor(if (on) Color.WHITE else getColor(R.color.md_on_container))
+            val onColor = if (i < 2) getColor(R.color.md_on_primary) else getColor(R.color.md_on_tertiary)
+            tabs[i].setTextColor(if (on) onColor else getColor(R.color.md_on_container))
         }
     }
 
@@ -894,21 +929,21 @@ class MainActivity : Activity() {
         // The storage itself is the chooser on the left; the path starts below it
         for ((i, dir) in parts.withIndex()) {
             if (i == 0) {
-                bar.row.addView(crumbText("/", null).apply { setOnClickListener { open(p, dir) } })
+                bar.row.addView(crumbText(p, "/", null).apply { setOnClickListener { open(p, dir) } })
                 continue
             }
-            if (i > 1) bar.row.addView(crumbText(" › ", null))
-            bar.row.addView(crumbText(dir.name) { open(p, dir) })
+            if (i > 1) bar.row.addView(crumbText(p, " › ", null))
+            bar.row.addView(crumbText(p, dir.name) { open(p, dir) })
         }
         // Right-aligned: show the end of the path (the current folder)
         bar.post { bar.scrollTo(bar.row.width, 0) }
     }
 
-    private fun crumbText(label: String, onClick: (() -> Unit)? = null) = TextView(this).apply {
+    private fun crumbText(p: Pane, label: String, onClick: (() -> Unit)? = null) = TextView(this).apply {
         text = label
         textSize = 13f
         maxLines = 1
-        setTextColor(Color.WHITE)
+        setTextColor(p.onColor)
         typeface = Typeface.DEFAULT_BOLD
         setPadding(dp(4), dp(8), dp(4), dp(8))
         if (onClick != null) setOnClickListener { onClick() }
