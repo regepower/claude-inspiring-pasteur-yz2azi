@@ -116,6 +116,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     lateinit var fileList: PanList
     var treePage = 0
     var filePage = 0
+    var lastMarked: File? = null           // row marked last: kept visible when the marking bar appears
     @Volatile var gen = 0
     var raw: List<Entry> = emptyList()   // as read from disk
     var sortBy = SortBy.NAME
@@ -845,6 +846,7 @@ class MainActivity : Activity() {
                 if (e.up) continue
                 if (rangeMark) p.selected.add(e.file) else p.selected.remove(e.file)
             }
+            p.entries.getOrNull(b)?.let { p.lastMarked = it.file }
             refreshSelection()
         }
         list.adapter = p.fileAdapter
@@ -960,6 +962,7 @@ class MainActivity : Activity() {
     }
 
     private fun toggle(p: Pane, f: File) {
+        p.lastMarked = f
         if (!p.selected.remove(f)) p.selected.add(f)
         for (other in panes) if (other !== p) other.selected.clear()
         refreshSelection()
@@ -1268,11 +1271,32 @@ class MainActivity : Activity() {
 
     private fun updateBar() {
         val active = panes.firstOrNull { it.selected.isNotEmpty() }
+        val appears = active != null && bar.visibility != View.VISIBLE
         bar.visibility = if (active == null) View.GONE else View.VISIBLE
         if (active == null) return
+        if (appears) active.lastMarked?.let { keepVisible(active, it) }
         val files = active.entries.filter { !it.up && !it.isDir && it.file in active.selected }
         val size = Formatter.formatShortFileSize(this, files.sumOf { it.size })
         barCount.text = getString(R.string.selected_size, active.selected.size, size)
+    }
+
+    /** After the list got shorter (marking bar shown): scrolls so the row of [f] is not hidden below. */
+    private fun keepVisible(p: Pane, f: File) {
+        val list = p.fileList
+        val obs = list.viewTreeObserver
+        obs.addOnGlobalLayoutListener(object : android.view.ViewTreeObserver.OnGlobalLayoutListener {
+            override fun onGlobalLayout() {
+                if (obs.isAlive) obs.removeOnGlobalLayoutListener(this) else list.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                val pos = p.entries.indexOfFirst { it.file == f }
+                if (pos < 0 || list.height == 0) return
+                val bottom = list.height - list.paddingBottom
+                val child = list.getChildAt(pos - list.firstVisiblePosition)
+                when {
+                    child == null && pos > list.lastVisiblePosition -> list.setSelectionFromTop(pos, bottom - dp(56))
+                    child != null && child.bottom > bottom -> list.scrollListBy(child.bottom - bottom)
+                }
+            }
+        })
     }
 
     /** Item count of a folder: null while it is being counted on the counter thread. */
