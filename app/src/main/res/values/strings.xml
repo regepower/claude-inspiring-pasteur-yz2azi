@@ -37,15 +37,25 @@
         <item>Four pages</item>
         <item>Open and mark</item>
         <item>Menu and actions</item>
-        <item>Folder tree</item>
-        <item>Access</item>
+        <item>Folder tree, favourites, sorting</item>
+        <item>Storage and network</item>
+        <item>Archives (ZIP, 7z)</item>
+        <item>Text and hex viewer</item>
+        <item>Copying, conflicts, progress</item>
+        <item>Settings</item>
+        <item>Access and privacy</item>
     </string-array>
     <string-array name="help_bodies">
-        <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
-        <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. A ZIP or 7z archive opens like a folder (read-only): mark entries and copy or hold them to unpack just those, into a new folder or directly into the target, with progress. Mark: tap the icon on the left, a check appears on it.</item>
-        <item>Hold a row: menu with \"Open with\", share, print, view (text/hex), rename, convert pictures to WebP, unpack ZIP/7z, pack as ZIP, copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
-        <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page. The ⋮ chip above the list: new folder, add or remove the folder as a favourite (favourites are at the top of the tree with ★). Sort and filter: the two chips above the list.</item>
-        <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
+        <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move, unpack and pack always go from the marked side to the other side.</item>
+        <item>Tap a row to open it: a folder opens in the list, a file in its app. A file's icon shows the app that opens it; pictures and videos show a preview. \"..\" goes one folder up, so does the back key. Marking: tap the icon on the left, a check appears. Drag sideways with two fingers to scroll long names.</item>
+        <item>Hold a row: menu with open with, view (text/hex), share, print, rename, unpack ZIP/7z, pack as ZIP, copy pictures as WebP to the target or convert them to WebP here (the original is deleted only after the conversion worked), copy, move, delete. Marked items also have buttons at the bottom. Installing an APK needs the permission \"Install unknown apps\" once.</item>
+        <item>Tap the arrow to unfold a folder, tap the name to open it on the next page. Chip ⋮ above the list: new folder, add the folder to the favourites or remove it (favourites are at the top of the tree with ★). The Sort and Filter chips order and filter the list (name, date, size, type; pictures, videos, documents, name contains …).</item>
+        <item>The field on the left of the coloured band (e.g. \"Internal ▾\") picks the storage: internal, SD card, USB, cloud folders of other apps (☁, e.g. Google Drive, via \"Add cloud / drive\") and network servers (🌐). Network servers: FTP, FTPS or WebDAV (e.g. Nextcloud with start folder remote.php/dav/files/NAME); \"Search in Wi-Fi\" finds servers that announce themselves. The connection is tested before saving, passwords are stored encrypted. Files from a server are loaded first to open them. The path is on the right of the band, every part can be tapped.</item>
+        <item>A ZIP or 7z archive opens like a folder with one tap (read-only), also in the tree. Mark entries and copy (or hold → unpack): only these are unpacked, into a folder named after the archive or directly into the target. Tap a file inside to open it. Password-protected archives are not supported.</item>
+        <item>View (text/hex) opens even very large files at once. One finger scrolls both ways, two fingers zoom the text. Hold a word to mark it, the round handles extend the mark; then copy, share or all. Top right switches between text and hex. Back first removes a mark.</item>
+        <item>If a name already exists in the target, the app asks: overwrite (folders are merged), skip or keep both (\"name (1)\"), optionally for all. Copy, move, delete, pack and unpack show their progress and can be cancelled; a half-copied file is removed.</item>
+        <item>Gear ⚙: fixed app per file type (change or delete), add or remove cloud folders, show hidden files, previews on/off, save and load the configuration (app choices, favourites, settings), error report (last crash or hang, to copy or share).</item>
+        <item>The app needs \"all files access\"; the system setting opens on first start. No data is collected or sent. The app only goes online to servers you added yourself.</item>
     </string-array>
     <string name="open_with">Open with…</string>
     <string name="back_again">Nochmal zurück drücken zum Beenden</string>
