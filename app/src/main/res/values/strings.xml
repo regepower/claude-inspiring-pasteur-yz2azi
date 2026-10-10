@@ -132,4 +132,5 @@
     <string name="webp_lossy">Lossy, quality %1$d</string>
     <string name="webp_lossless">Lossless</string>
     <string name="webp_converting">Converting…</string>
+    <string name="view_copied">Copied</string>
 </resources>

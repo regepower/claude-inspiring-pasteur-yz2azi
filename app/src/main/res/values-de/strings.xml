@@ -125,4 +125,5 @@
     <string name="webp_lossy">Verlustbehaftet, Qualität %1$d</string>
     <string name="webp_lossless">Verlustfrei</string>
     <string name="webp_converting">Wandle um…</string>
+    <string name="view_copied">Kopiert</string>
 </resources>

@@ -15,6 +15,10 @@ import kotlin.math.max
  */
 internal class RangeBar(context: Context) : View(context) {
     var onDrag: ((Int) -> Unit)? = null
+    var vertical = false   // a bar at the right edge for up/down
+
+    private fun length() = if (vertical) height else width
+    private fun along(ev: MotionEvent) = if (vertical) ev.y else ev.x
 
     private var content = 0
     private var viewport = 0
@@ -37,19 +41,21 @@ internal class RangeBar(context: Context) : View(context) {
     private fun maxOffset() = max(0, content - viewport)
 
     private fun thumbWidth(): Float =
-        if (content <= viewport || content <= 0) width.toFloat()
-        else max(minThumb, width * viewport.toFloat() / content)
+        if (content <= viewport || content <= 0) length().toFloat()
+        else max(minThumb, length() * viewport.toFloat() / content)
 
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()
-        val r = h / 2
+        val len = if (vertical) h else w
+        val thick = if (vertical) w else h
+        val r = thick / 2
         rect.set(0f, 0f, w, h)
         canvas.drawRoundRect(rect, r, r, track)
         val tw = thumbWidth()
         val maxOff = maxOffset()
-        val x = if (maxOff == 0) 0f else (w - tw) * offset / maxOff
-        rect.set(x, h * 0.25f, x + tw, h * 0.75f)
+        val x = if (maxOff == 0) 0f else (len - tw) * offset / maxOff
+        if (vertical) rect.set(thick * 0.25f, x, thick * 0.75f, x + tw) else rect.set(x, thick * 0.25f, x + tw, thick * 0.75f)
         canvas.drawRoundRect(rect, r, r, thumb)
     }
 
@@ -58,19 +64,20 @@ internal class RangeBar(context: Context) : View(context) {
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
                 val tw = thumbWidth()
-                val x = (width - tw) * offset / max(1, maxOffset())
+                val x = (length() - tw) * offset / max(1, maxOffset())
+                val at = along(ev)
                 dragging = true
-                if (ev.x < x || ev.x > x + tw) {
+                if (at < x || at > x + tw) {
                     // Tap on the track: jump with the thumb centred on the finger
-                    val space = width - tw
-                    if (space > 0) onDrag?.invoke(((ev.x - tw / 2) / space * maxOffset()).toInt())
+                    val space = length() - tw
+                    if (space > 0) onDrag?.invoke(((at - tw / 2) / space * maxOffset()).toInt())
                 }
-                startX = ev.x
+                startX = at
                 startOffset = offset
             }
             MotionEvent.ACTION_MOVE -> if (dragging) {
-                val space = width - thumbWidth()
-                if (space > 0) onDrag?.invoke((startOffset + (ev.x - startX) * maxOffset() / space).toInt())
+                val space = length() - thumbWidth()
+                if (space > 0) onDrag?.invoke((startOffset + (along(ev) - startX) * maxOffset() / space).toInt())
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging = false
         }
