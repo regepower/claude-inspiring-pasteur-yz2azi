@@ -778,6 +778,21 @@ class MainActivity : Activity() {
             return out
         }
         if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
+        // Native: names, sizes, dates and types in one call (about twice as fast for big folders)
+        val fast = if (NativeLib.ok) NativeLib.listDir(dir.path) else null
+        if (fast != null) {
+            @Suppress("UNCHECKED_CAST") val names = fast[0] as Array<String?>
+            val info = fast[1] as LongArray
+            val items = ArrayList<Entry>(names.size)
+            for (i in names.indices) {
+                val name = names[i] ?: continue
+                if (!visible(name)) continue
+                val flags = info[i * 3 + 2]
+                items.add(finish(Entry(File(dir, name), false, flags and 1L != 0L, info[i * 3], info[i * 3 + 1])))
+            }
+            out.addAll(items.sortedWith(compareBy({ !it.isDir }, { it.key })))
+            return out
+        }
         val files = dir.listFiles().orEmpty().filter { visible(it.name) }.map { f ->
             try {
                 val a = Files.readAttributes(f.toPath(), BasicFileAttributes::class.java)
@@ -933,6 +948,10 @@ class MainActivity : Activity() {
         }
         labels.add(getString(R.string.arc_zip))
         actions.add(8)
+        if (selectedOr(file).any { Webp.canConvert(it) }) {
+            labels.add(getString(R.string.webp_convert))
+            actions.add(10)
+        }
         labels.add(getString(R.string.copy_to_target))
         actions.add(0)
         labels.add(getString(R.string.move_to_target))
@@ -950,6 +969,7 @@ class MainActivity : Activity() {
                     6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
                     7 -> askExtract(file, listOf(""))
                     9 -> viewFile(file)
+                    10 -> askWebp(selectedOr(file).filter { Webp.canConvert(it) })
                     8 -> {
                         val items = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
                         if (Archive.inside(targetDir())) {
@@ -1139,6 +1159,38 @@ class MainActivity : Activity() {
                 else Toast.makeText(this, R.string.arc_read, Toast.LENGTH_SHORT).show()
             }
         }.start()
+    }
+
+    /** The marked entries, or [file] alone when nothing is marked. */
+    private fun selectedOr(file: File): List<File> =
+        panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.toList() ?: listOf(file)
+
+    /** Pictures to WebP in the target: quality first, then existing names, then the run with progress. */
+    private fun askWebp(pictures: List<File>) {
+        val dst = targetDir()
+        if (pictures.isEmpty()) return
+        if (Archive.inside(dst)) {
+            Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val qualities = intArrayOf(90, 80, 60, -1)
+        val labels = arrayOf(
+            getString(R.string.webp_lossy, 90), getString(R.string.webp_lossy, 80),
+            getString(R.string.webp_lossy, 60), getString(R.string.webp_lossless)
+        )
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.webp_title, pictures.size))
+            .setItems(labels) { _, which ->
+                val q = qualities[which]
+                resolveClashes(dst, pictures.map { Webp.targetName(it) }) { m ->
+                    val run = pictures.filter { m[Webp.targetName(it)] != Clash.SKIP }
+                    execute(R.string.webp_converting, run, true) { f, _ ->
+                        Webp.convert(this, f, dst, q, m[Webp.targetName(f)] == Clash.OVERWRITE)
+                    }
+                }
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
     }
 
     /** Size in whole KB with thousands separators, e.g. "12.345 KB". */

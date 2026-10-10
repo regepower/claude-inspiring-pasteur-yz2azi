@@ -16,10 +16,29 @@ fun interface ArcProgress {
     fun step(done: Long, total: Long): Boolean
 }
 
+/** Native helpers (src/main/cpp): fast folder listing and EXIF for WebP. [ok] is false if the library is missing. */
+internal object NativeLib {
+    val ok = try {
+        System.loadLibrary("dualfiles")
+        true
+    } catch (e: UnsatisfiedLinkError) {
+        false
+    }
+
+    /** { String[] names, long[] info } with size, modified ms and flags (1 folder, 2 read) per entry; null on error. */
+    @JvmStatic external fun listDir(path: String): Array<Any>?
+
+    /** EXIF (TIFF block) of a JPEG with the orientation set to normal, or null. */
+    @JvmStatic external fun jpegExif(path: String): ByteArray?
+
+    /** Adds [exif] to the WebP file [path] (rewritten in the extended format). */
+    @JvmStatic external fun webpAddExif(path: String, exif: ByteArray, w: Int, h: Int, alpha: Boolean): Boolean
+}
+
 /** 7z reading in C (7z decoder of the LZMA SDK, see src/main/cpp). */
 internal object SevenZip {
     init {
-        System.loadLibrary("sevenz")
+        System.loadLibrary("dualfiles")
     }
 
     /** One "D|F \t size \t mtime \t name" string per entry, or a single "!code" on failure. */

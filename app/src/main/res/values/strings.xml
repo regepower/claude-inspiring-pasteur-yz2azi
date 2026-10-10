@@ -43,7 +43,7 @@
     <string-array name="help_bodies">
         <item>Swipe left and right (or tap the tabs): folder tree of the source, files of the source, files of the target, folder tree of the target. Copy, move and delete always go from the marked side to the other side.</item>
         <item>Tap a row to open it: a folder opens in the list, a file in its default app. The icon of a file is the icon of the app that opens it. \"..\" goes one folder up. A ZIP or 7z archive opens like a folder (read-only): mark entries and copy or hold them to unpack just those, into a new folder or directly into the target, with progress. Mark: tap the icon on the left, a check appears on it.</item>
-        <item>Hold a row: menu with \"Open with\", share, print, view (text/hex), rename, unpack ZIP/7z, pack as ZIP, copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
+        <item>Hold a row: menu with \"Open with\", share, print, view (text/hex), rename, convert pictures to WebP, unpack ZIP/7z, pack as ZIP, copy, move, delete (to the other side). Marked items also have buttons at the bottom. Drag sideways with two fingers: all long names scroll, icons and check boxes stay. One finger still swipes the pages.</item>
         <item>Tap the arrow to unfold a folder. Tap the name to select it: its files appear on the next page. The ⋮ chip above the list: new folder, add or remove the folder as a favourite (favourites are at the top of the tree with ★). Sort and filter: the two chips above the list.</item>
         <item>The app needs \"all files access\". It opens the system setting on first start. Nothing leaves your phone.</item>
     </string-array>
@@ -127,4 +127,9 @@
     <string name="op_moving">Moving…</string>
     <string name="op_deleting">Deleting…</string>
     <string name="op_count">%1$d of %2$d entries</string>
+    <string name="webp_convert">Convert to WebP in target</string>
+    <string name="webp_title">%1$d pictures to WebP</string>
+    <string name="webp_lossy">Lossy, quality %1$d</string>
+    <string name="webp_lossless">Lossless</string>
+    <string name="webp_converting">Converting…</string>
 </resources>

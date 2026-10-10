@@ -12,6 +12,7 @@
 #include "lzma/7zAlloc.h"
 #include "lzma/7zCrc.h"
 #include "lzma/7zFile.h"
+#include "jutil.h"
 
 #define IN_BUF_SIZE ((size_t)1 << 18)
 #define ERR_PATH 100     /* entry name would leave the target folder */
@@ -20,44 +21,6 @@
 
 static const ISzAlloc g_Alloc = { SzAlloc, SzFree };
 
-/* UTF-16 name from the archive to UTF-8; returns bytes written (without the 0) or -1. */
-static int utf16_to_utf8(const UInt16 *s, char *out, size_t outSize)
-{
-  size_t n = 0;
-  for (; *s; s++)
-  {
-    UInt32 c = *s;
-    if (c >= 0xD800 && c < 0xDC00 && s[1] >= 0xDC00 && s[1] < 0xE000)
-    {
-      c = 0x10000 + ((c - 0xD800) << 10) + (s[1] - 0xDC00);
-      s++;
-    }
-    if (n + 5 > outSize)
-      return -1;
-    if (c < 0x80)
-      out[n++] = (char)c;
-    else if (c < 0x800)
-    {
-      out[n++] = (char)(0xC0 | (c >> 6));
-      out[n++] = (char)(0x80 | (c & 0x3F));
-    }
-    else if (c < 0x10000)
-    {
-      out[n++] = (char)(0xE0 | (c >> 12));
-      out[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
-      out[n++] = (char)(0x80 | (c & 0x3F));
-    }
-    else
-    {
-      out[n++] = (char)(0xF0 | (c >> 18));
-      out[n++] = (char)(0x80 | ((c >> 12) & 0x3F));
-      out[n++] = (char)(0x80 | ((c >> 6) & 0x3F));
-      out[n++] = (char)(0x80 | (c & 0x3F));
-    }
-  }
-  out[n] = 0;
-  return (int)n;
-}
 
 /* Turns '\' into '/', drops empty parts and rejects absolute names and ".." parts. */
 static int safe_name(char *name)
@@ -106,34 +69,6 @@ static int make_dirs(char *path, int all)
   return 1;
 }
 
-/* Java string as standard UTF-8 (JNI's own UTF-8 is "modified" and breaks emoji); free() the result. */
-static char *jstr_utf8(JNIEnv *env, jstring js)
-{
-  jsize len = (*env)->GetStringLength(env, js);
-  const jchar *chars = (*env)->GetStringChars(env, js, NULL);
-  UInt16 *z = (UInt16 *)malloc(((size_t)len + 1) * sizeof(UInt16));
-  size_t outSize = (size_t)len * 3 + 8;
-  char *out = (char *)malloc(outSize);
-  if (z && out && chars)
-  {
-    memcpy(z, chars, (size_t)len * sizeof(UInt16));
-    z[len] = 0;
-    if (utf16_to_utf8(z, out, outSize) < 0)
-    {
-      free(out);
-      out = NULL;
-    }
-  }
-  else
-  {
-    free(out);
-    out = NULL;
-  }
-  if (chars)
-    (*env)->ReleaseStringChars(env, js, chars);
-  free(z);
-  return out;
-}
 
 /* An opened archive; Open/Close keep the setup of the LZMA SDK in one place. */
 typedef struct
