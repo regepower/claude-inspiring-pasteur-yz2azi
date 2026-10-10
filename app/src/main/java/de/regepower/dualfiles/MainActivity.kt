@@ -39,6 +39,7 @@ import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.BaseAdapter
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
@@ -958,7 +959,11 @@ class MainActivity : Activity() {
                         val base = if (items.size == 1) items[0].nameWithoutExtension.ifEmpty { items[0].name } else getString(R.string.arc_default)
                         askName(R.string.arc_zip, "$base.zip") { name ->
                             val dst = targetDir()
-                            runArchive(R.string.arc_packing) { pr -> Archive.zip(this, items, dst, name, pr) }
+                            resolveClashes(dst, listOf(name)) { m ->
+                                if (m[name] != Clash.SKIP) {
+                                    runArchive(R.string.arc_packing) { pr -> Archive.zip(this, items, dst, name, m[name] == Clash.OVERWRITE, pr) }
+                                }
+                            }
                         }
                     }
                     else -> act(actions[which])
@@ -977,13 +982,22 @@ class MainActivity : Activity() {
             else Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
             return
         }
-        if (dstDir.let { Archive.inside(it) }) {
+        if (which != 2 && Archive.inside(dstDir)) {
             Toast.makeText(this, R.string.arc_readonly, Toast.LENGTH_SHORT).show()
             return
         }
         when (which) {
-            0 -> execute(items) { Transfer.copy(this, it, dstDir) }
-            1 -> execute(items) { Transfer.move(this, it, dstDir) }
+            0, 1 -> {
+                // Copying into the same folder never clashes: it makes "name (1)"
+                val names = items.filter { it.parentFile?.path != dstDir.path }.map { it.name }
+                resolveClashes(dstDir, names) { m ->
+                    val run = items.filter { m[it.name] != Clash.SKIP }
+                    execute(run) {
+                        val ow = m[it.name] == Clash.OVERWRITE
+                        if (which == 0) Transfer.copy(this, it, dstDir, ow) else Transfer.move(this, it, dstDir, ow)
+                    }
+                }
+            }
             else -> AlertDialog.Builder(this)
                 .setMessage(getString(R.string.delete_confirm, items.size))
                 .setPositiveButton(R.string.delete) { _, _ -> execute(items) { Transfer.delete(this, it) } }
@@ -1065,7 +1079,16 @@ class MainActivity : Activity() {
             .setTitle(R.string.arc_extract)
             .setItems(items) { _, which ->
                 val folder = if (which == 0) name else null
-                runArchive(R.string.arc_extracting) { pr -> Archive.extract(this, archive, selected, dst, folder, pr) }
+                // Names that will appear in the target (only known for archives we can list)
+                val tops = when {
+                    folder != null -> listOf(folder)
+                    !Archive.isArchive(archive) -> emptyList()
+                    selected == listOf("") -> Archive.children(archive, "").map { it.name }
+                    else -> selected.map { it.substringAfterLast('/') }
+                }
+                resolveClashes(dst, tops) { m ->
+                    runArchive(R.string.arc_extracting) { pr -> Archive.extract(this, archive, selected, dst, folder, m, pr) }
+                }
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -1106,6 +1129,41 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /** Size in whole KB with thousands separators, e.g. "12.345 KB". */
+    private fun kb(bytes: Long) = java.text.NumberFormat.getIntegerInstance().format((bytes + 1023) / 1024) + " KB"
+
+    /**
+     * For every name in [names] that already exists in [dst], asks: overwrite, skip or keep both
+     * ("name (1)"), optionally for all at once. [then] gets the answers; back cancels the whole action.
+     */
+    private fun resolveClashes(dst: File, names: List<String>, then: (Map<String, Clash>) -> Unit) {
+        if (names.isEmpty()) return then(emptyMap())
+        Thread {
+            val existing = names.distinct().filter { Transfer.isDirectory(this, File(dst, it)) != null }
+            runOnUiThread { if (!isFinishing) askClash(existing, 0, HashMap(), then) }
+        }.start()
+    }
+
+    private fun askClash(names: List<String>, i: Int, out: HashMap<String, Clash>, then: (Map<String, Clash>) -> Unit) {
+        if (i == names.size) return then(out)
+        val all = CheckBox(this)
+        all.setText(getString(R.string.clash_all, names.size - i))
+        val box = FrameLayout(this)
+        box.setPadding(dp(20), dp(8), dp(20), 0)
+        if (names.size - i > 1) box.addView(all)
+        fun pick(c: Clash) {
+            if (all.isChecked) for (n in names.drop(i)) out[n] = c else out[names[i]] = c
+            askClash(names, if (all.isChecked) names.size else i + 1, out, then)
+        }
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.clash_title, names[i]))
+            .setView(box)
+            .setPositiveButton(R.string.clash_overwrite) { _, _ -> pick(Clash.OVERWRITE) }
+            .setNeutralButton(R.string.clash_keep) { _, _ -> pick(Clash.RENAME) }
+            .setNegativeButton(R.string.clash_skip) { _, _ -> pick(Clash.SKIP) }
+            .show()
+    }
+
     /** Folder of the pane without a selection (the other side). */
     private fun targetDir(): File {
         val src = panes.firstOrNull { it.selected.isNotEmpty() } ?: panes[0]
@@ -1140,7 +1198,7 @@ class MainActivity : Activity() {
                 runOnUiThread {
                     bar.isIndeterminate = total <= 0
                     if (total > 0) bar.progress = (done * 1000 / total).toInt()
-                    text.text = getString(R.string.arc_progress, Formatter.formatShortFileSize(this, done), Formatter.formatShortFileSize(this, total))
+                    text.text = getString(R.string.arc_progress, kb(done), kb(total))
                 }
             }
             !cancelled.get()

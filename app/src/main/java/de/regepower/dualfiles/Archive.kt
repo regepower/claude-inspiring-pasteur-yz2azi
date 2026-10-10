@@ -162,7 +162,10 @@ internal object Archive {
      * lands there with its own name (top-level names made unique), inside a new folder [folder] if given.
      * [archive] may lie in a Saf folder (whole archive only), [dstDir] may be a Saf folder.
      */
-    fun extract(ctx: Context, archive: File, selected: List<String>, dstDir: File, folder: String?, progress: ArcProgress): Result {
+    fun extract(
+        ctx: Context, archive: File, selected: List<String>, dstDir: File, folder: String?,
+        clashes: Map<String, Clash>, progress: ArcProgress,
+    ): Result {
         val work = File(ctx.cacheDir, "archive").apply { deleteRecursively(); mkdirs() }
         try {
             val local = if (Saf.isSaf(archive)) {
@@ -178,7 +181,7 @@ internal object Archive {
             // Output name for every wanted entry, relative to the output folder
             val toSaf = Saf.isSaf(dstDir)
             val out = if (toSaf) File(work, "out").apply { mkdirs() } else dstDir
-            val tops = HashMap<String, String>()   // top-level name -> unique name in out
+            val tops = HashMap<String, String?>()  // top-level name -> name in out (null = skipped)
             val names = arrayOfNulls<String>(l.count)
             for (item in l.items) {
                 if (item.index < 0) continue
@@ -187,7 +190,13 @@ internal object Archive {
                 var rel = item.path.substring(cut)
                 if (folder != null) rel = "$folder/$rel"
                 val top = rel.substringBefore('/')
-                val unique = tops.getOrPut(top) { if (toSaf) top else FileOps.uniqueTarget(out, top).name }
+                val unique = tops.getOrPut(top) {
+                    when (clashes[top]) {
+                        Clash.SKIP -> null
+                        Clash.OVERWRITE -> top
+                        else -> if (toSaf) top else FileOps.uniqueTarget(out, top).name
+                    }
+                } ?: continue
                 names[item.index] = unique + rel.substring(top.length)
             }
             if (names.all { it == null }) return Result(null)
@@ -201,11 +210,13 @@ internal object Archive {
                 if (r < 0) errorText(r) else null
             } else unzip(local, out, names, progress)
             if (error != null) {
-                // Remove what was started, so no half-unpacked folders stay behind
-                for (t in tops.values) File(out, t).deleteRecursively()
+                // Remove only what this run created; folders merged into (overwrite) stay
+                for ((top, t) in tops) if (t != null && (toSaf || clashes[top] != Clash.OVERWRITE)) File(out, t).deleteRecursively()
                 return Result(error)
             }
-            if (toSaf) for (t in tops.values) if (!Transfer.copy(ctx, File(out, t), dstDir)) return Result(R.string.arc_write)
+            if (toSaf) for ((top, t) in tops) {
+                if (t != null && !Transfer.copy(ctx, File(out, t), dstDir, clashes[top] == Clash.OVERWRITE)) return Result(R.string.arc_write)
+            }
             return Result(null)
         } catch (e: IOException) {
             return Result(R.string.arc_read)
@@ -271,12 +282,13 @@ internal object Archive {
     /** Extracts one file of an archive to the cache, for opening it in another app. */
     fun extractForView(ctx: Context, archive: File, inner: String): File? {
         val dir = File(ctx.cacheDir, "view").apply { deleteRecursively(); mkdirs() }
-        val r = extract(ctx, archive, listOf(inner), dir, null) { _, _ -> true }
+        val r = extract(ctx, archive, listOf(inner), dir, null, emptyMap()) { _, _ -> true }
         return File(dir, inner.substringAfterLast('/')).takeIf { r.error == null && it.isFile }
     }
 
     /** Packs [items] (files and folders) into [dstDir]/[name]. */
-    fun zip(ctx: Context, items: List<File>, dstDir: File, name: String, progress: ArcProgress): Result {
+    fun zip(ctx: Context, items: List<File>, dstDir: File, name: String, overwrite: Boolean, progress: ArcProgress): Result {
+        if (overwrite) File(dstDir, name).let { if (Transfer.isDirectory(ctx, it) == false) Transfer.delete(ctx, it) }
         val target = Transfer.createChild(ctx, dstDir, name, false) ?: return Result(R.string.arc_write)
         val total = items.sumOf { size(ctx, it) }
         var cancelled = false

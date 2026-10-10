@@ -111,4 +111,9 @@
     <string name="view_info_hex">%1$s · Hex</string>
     <string name="view_info_text">%1$s · %2$d Zeilen · %3$s</string>
     <string name="view_info_reading">%1$s · bisher %2$d Zeilen… · %3$s</string>
+    <string name="clash_title">\"%1$s\" gibt es im Ziel schon</string>
+    <string name="clash_overwrite">Überschreiben</string>
+    <string name="clash_skip">Überspringen</string>
+    <string name="clash_keep">Beide behalten</string>
+    <string name="clash_all">Für alle %1$d Konflikte</string>
 </resources>

@@ -27,13 +27,17 @@ object FileOps {
         return target
     }
 
-    fun copy(src: File, dstDir: File): Boolean {
+    /** [overwrite]: an existing file of the same name is replaced, an existing folder is merged into. */
+    fun copy(src: File, dstDir: File, overwrite: Boolean = false): Boolean {
         if (src.isDirectory && isInside(dstDir, src)) return false
-        return copyTo(src, uniqueTarget(dstDir, src.name))
+        val target = if (overwrite) File(dstDir, src.name) else uniqueTarget(dstDir, src.name)
+        if (overwrite && target.canonicalPath == src.canonicalPath) return true
+        return copyTo(src, target)
     }
 
     private fun copyTo(src: File, dst: File): Boolean {
         if (!src.isDirectory) {
+            if (dst.isDirectory) return false
             return try {
                 src.inputStream().use { input -> dst.outputStream().use { input.copyTo(it) } }
                 true
@@ -41,7 +45,7 @@ object FileOps {
                 false
             }
         }
-        if (!dst.mkdirs()) return false
+        if (!dst.isDirectory && !dst.mkdirs()) return false
         var ok = true
         for (child in src.listFiles().orEmpty()) {
             if (!copyTo(child, File(dst, child.name))) ok = false
@@ -49,10 +53,15 @@ object FileOps {
         return ok
     }
 
-    fun move(src: File, dstDir: File): Boolean {
+    fun move(src: File, dstDir: File, overwrite: Boolean = false): Boolean {
         if (src.isDirectory && isInside(dstDir, src)) return false
         if (src.parentFile?.canonicalPath == dstDir.canonicalPath) return true
-        val target = uniqueTarget(dstDir, src.name)
+        val target = if (overwrite) File(dstDir, src.name) else uniqueTarget(dstDir, src.name)
+        if (target.exists()) {
+            // Overwrite: a file replaces the file, a folder is merged into the folder
+            if (src.isFile && target.isFile && target.delete() && src.renameTo(target)) return true
+            return copyTo(src, target) && delete(src)
+        }
         if (src.renameTo(target)) return true
         // Different volume: copy, then delete the source only if everything was copied.
         return copyTo(src, target) && delete(src)

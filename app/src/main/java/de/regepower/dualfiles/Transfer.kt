@@ -12,23 +12,28 @@ import java.io.OutputStream
  * Copy, move and delete for local files and for folders from the storage access framework (Saf).
  * Local-to-local uses [FileOps]; anything touching a Saf folder streams the bytes through the provider.
  */
+/** What to do when a name already exists in the target. */
+internal enum class Clash { OVERWRITE, SKIP, RENAME }
+
 internal object Transfer {
 
-    fun copy(ctx: Context, src: File, dstDir: File): Boolean {
-        if (!Saf.isSaf(src) && !Saf.isSaf(dstDir)) return FileOps.copy(src, dstDir)
+    /** [overwrite]: an existing file of the same name is replaced, an existing folder is merged into. */
+    fun copy(ctx: Context, src: File, dstDir: File, overwrite: Boolean = false): Boolean {
+        if (!Saf.isSaf(src) && !Saf.isSaf(dstDir)) return FileOps.copy(src, dstDir, overwrite)
         // Refuse to copy a folder into itself
         if (isDirectory(ctx, src) == true && (dstDir.path == src.path || dstDir.path.startsWith(src.path + "/"))) return false
         return try {
-            copyTree(ctx, src, dstDir)
+            copyTree(ctx, src, dstDir, overwrite)
         } catch (e: IOException) {
             false
         }
     }
 
-    fun move(ctx: Context, src: File, dstDir: File): Boolean {
+    fun move(ctx: Context, src: File, dstDir: File, overwrite: Boolean = false): Boolean {
         if (src.parentFile?.path == dstDir.path) return true
+        if (!Saf.isSaf(src) && !Saf.isSaf(dstDir)) return FileOps.move(src, dstDir, overwrite)
         // Only delete the source once the whole copy succeeded
-        return copy(ctx, src, dstDir) && delete(ctx, src)
+        return copy(ctx, src, dstDir, overwrite) && delete(ctx, src)
     }
 
     fun delete(ctx: Context, f: File): Boolean {
@@ -56,12 +61,14 @@ internal object Transfer {
         return if (Saf.isSaf(dir)) Saf.createChild(ctx, dir, name, true) != null else File(dir, name).mkdir()
     }
 
-    private fun copyTree(ctx: Context, src: File, dstDir: File): Boolean {
+    private fun copyTree(ctx: Context, src: File, dstDir: File, overwrite: Boolean): Boolean {
         val dir = isDirectory(ctx, src) ?: return false
-        val target = createChild(ctx, dstDir, src.name, dir) ?: return false
+        // Overwrite: reuse an existing entry of the same kind (file contents are replaced, folders merged)
+        val existing = if (overwrite) File(dstDir, src.name).takeIf { isDirectory(ctx, it) == dir } else null
+        val target = existing ?: createChild(ctx, dstDir, src.name, dir) ?: return false
         if (!dir) return streamCopy(ctx, src, target)
         var ok = true
-        for (child in children(ctx, src)) if (!copyTree(ctx, child, target)) ok = false
+        for (child in children(ctx, src)) if (!copyTree(ctx, child, target, overwrite)) ok = false
         return ok
     }
 
@@ -97,6 +104,6 @@ internal object Transfer {
         else FileInputStream(f)
 
     fun openOutput(ctx: Context, f: File): OutputStream? =
-        if (Saf.isSaf(f)) Saf.docUri(ctx, f)?.let { ctx.contentResolver.openOutputStream(it, "w") }
+        if (Saf.isSaf(f)) Saf.docUri(ctx, f)?.let { ctx.contentResolver.openOutputStream(it, "wt") }
         else FileOutputStream(f)
 }

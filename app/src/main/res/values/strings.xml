@@ -118,4 +118,9 @@
     <string name="view_info_hex">%1$s · hex</string>
     <string name="view_info_text">%1$s · %2$d lines · %3$s</string>
     <string name="view_info_reading">%1$s · %2$d lines so far… · %3$s</string>
+    <string name="clash_title">\"%1$s\" already exists in the target</string>
+    <string name="clash_overwrite">Overwrite</string>
+    <string name="clash_skip">Skip</string>
+    <string name="clash_keep">Keep both</string>
+    <string name="clash_all">For all %1$d conflicts</string>
 </resources>
