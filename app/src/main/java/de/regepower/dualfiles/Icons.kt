@@ -174,7 +174,7 @@ internal class EntryIcon(
     private val textColor: Int,
     private val selected: Boolean,
     private val badge: Int,
-    private val appBadge: Bitmap? = null,
+    private val appBadge: AppBadge? = null,
     private val appTint: Int = 0,
     private val thumb: Bitmap? = null,
     private val checkColor: Int = Color.WHITE,
@@ -207,9 +207,14 @@ internal class EntryIcon(
             fillPaint.color = 0x38000000
             canvas.drawPath(FOLD, fillPaint)
             if (appBadge != null) {
-                // The set app's monochrome symbol replaces the extension text, in the text colour
-                badgePaint.colorFilter = PorterDuffColorFilter(appTint, PorterDuff.Mode.SRC_IN)
-                canvas.drawBitmap(appBadge, null, RectF(10f, 19f, 38f, 47f), badgePaint)
+                // The set app's symbol replaces the extension text: its silhouette in the text colour, or its colour icon
+                if (appBadge.mono) {
+                    badgePaint.colorFilter = PorterDuffColorFilter(appTint, PorterDuff.Mode.SRC_IN)
+                    canvas.drawBitmap(appBadge.bitmap, null, RectF(10f, 19f, 38f, 47f), badgePaint)
+                } else {
+                    badgePaint.colorFilter = null
+                    canvas.drawBitmap(appBadge.bitmap, null, RectF(11f, 20f, 37f, 46f), badgePaint)
+                }
             } else if (label.isNotEmpty()) {
                 textPaint.color = textColor
                 textPaint.textSize = IconText.sizeFor(label)
@@ -266,41 +271,57 @@ internal class EntryIcon(
     }
 }
 
+/** Symbol of an app on a file icon: a white silhouette ([mono], drawn in the text colour) or the app's colour icon. */
+internal class AppBadge(val bitmap: Bitmap, val mono: Boolean)
+
 /**
- * Symbol of the app set for a file type, as a single-colour silhouette (alpha only). Tried in order:
- * the opening activity's own icon, then the app icon; of each the monochrome layer (Android 13+),
- * the foreground layer, the whole icon. A layer counts only if it is a real symbol: not empty and not a
- * filled square (some apps ship a blank monochrome layer or a square bitmap). null = show the extension.
+ * Symbol of the app set for a file type. Tried in order, of the opening activity's icon, then the app icon:
+ * the monochrome layer (Android 13+, made for this); the foreground or the whole icon as a silhouette, but
+ * only if the shape says something (a filled blob, e.g. a multicoloured flower, does not); else the app's
+ * colour icon. null = show the extension.
  */
 internal object AppBadges {
     private const val SIZE = 48
-    private val cache = HashMap<String, Bitmap?>()   // UI thread only
+    private const val BLOB = 0.62f   // share of its own bounds a shape may fill and still be recognisable
+    private val cache = HashMap<String, AppBadge?>()   // UI thread only
 
-    fun get(context: Context, cn: android.content.ComponentName): Bitmap? =
+    fun get(context: Context, cn: android.content.ComponentName): AppBadge? =
         cache.getOrPut(cn.flattenToString()) { render(context, cn) }
 
-    private fun render(context: Context, cn: android.content.ComponentName): Bitmap? {
+    @SuppressLint("NewApi")
+    private fun render(context: Context, cn: android.content.ComponentName): AppBadge? {
         val pm = context.packageManager
         val icons = listOfNotNull(
             try { pm.getActivityIcon(cn) } catch (e: Exception) { null },
             try { pm.getApplicationIcon(cn.packageName) } catch (e: Exception) { null },
         )
-        for (icon in icons) for (layer in layers(icon)) silhouette(layer)?.let { return it }
-        return null
+        for (icon in icons) {
+            val mono = if (icon is AdaptiveIconDrawable && Build.VERSION.SDK_INT >= 33) icon.monochrome else null
+            mono?.let { silhouette(it, 1f) }?.let { return AppBadge(it, true) }
+        }
+        for (icon in icons) {
+            val shape = if (icon is AdaptiveIconDrawable) icon.foreground else icon
+            shape?.let { silhouette(it, BLOB) }?.let { return AppBadge(it, true) }
+        }
+        return icons.firstOrNull()?.let { colour(it) }?.let { AppBadge(it, false) }
     }
 
-    @SuppressLint("NewApi")
-    private fun layers(icon: Drawable): List<Drawable> {
-        if (icon !is AdaptiveIconDrawable) return listOf(icon)
-        val mono = if (Build.VERSION.SDK_INT >= 33) icon.monochrome else null
-        return listOfNotNull(mono, icon.foreground, icon)
+    /** The whole icon in its colours (an adaptive icon in the system's mask shape). */
+    private fun colour(icon: Drawable): Bitmap? = try {
+        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+        icon.setBounds(0, 0, SIZE, SIZE)
+        icon.draw(Canvas(bmp))
+        bmp
+    } catch (e: Exception) {
+        null
     }
 
     /**
-     * The shape of [src] in white. Icon layers have a lot of empty margin (the launcher's safe zone), so the
-     * shape is cut to its own bounds and scaled up: every badge fills the same space on the file icon.
+     * The shape of [src] in white, or null if it is empty, a filled square, or fills more than [maxFill] of
+     * its own bounds. Icon layers have a lot of empty margin (the launcher's safe zone), so the shape is
+     * cut to its own bounds and scaled up: every badge fills the same space on the file icon.
      */
-    private fun silhouette(src: Drawable): Bitmap? = try {
+    private fun silhouette(src: Drawable, maxFill: Float): Bitmap? = try {
         val big = SIZE * 2
         val bmp = Bitmap.createBitmap(big, big, Bitmap.Config.ARGB_8888)
         src.setBounds(0, 0, big, big)
@@ -326,7 +347,8 @@ internal object AppBadges {
             px[i] = (a shl 24) or 0xFFFFFF
         }
         val share = solid.toFloat() / px.size
-        if (share < 0.03f || share > 0.8f || right < left) null
+        val boxShare = if (right < left) 1f else solid.toFloat() / ((right - left + 1) * (bottom - top + 1))
+        if (share < 0.03f || share > 0.8f || right < left || boxShare > maxFill) null
         else {
             bmp.setPixels(px, 0, big, 0, 0, big, big)
             // Square around the shape, centred, with a little air
