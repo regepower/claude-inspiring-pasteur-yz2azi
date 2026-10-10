@@ -26,10 +26,12 @@ import android.text.TextUtils
 import android.text.format.DateFormat
 import android.text.format.Formatter
 import android.text.Spanned
+import android.text.SpannableString
 import android.text.SpannableStringBuilder
 import android.text.TextPaint
 import android.text.method.LinkMovementMethod
 import android.text.style.ClickableSpan
+import android.text.style.TabStopSpan
 import android.util.TypedValue
 import android.webkit.MimeTypeMap
 import android.view.Gravity
@@ -95,7 +97,7 @@ private class Entry(
     val modified: Long = 0,
 ) {
     val key = file.name.lowercase()
-    var meta = ""       // size · date (files); folders get their item count in the row
+    var meta = ""       // size, tab, date (files); folders get their item count in the row
     var width = 0f      // widest text of the row in px, for the horizontal range
 }
 
@@ -379,6 +381,7 @@ class MainActivity : Activity() {
     private val settings by lazy { getSharedPreferences("settings", MODE_PRIVATE) }
     @Volatile private var showHidden = false                   // read on the loader thread
     private var showThumbs = true
+    @Volatile private var sizeColumn = 0f                       // px from the start of the meta line to the date
     @Volatile private var showUpRow = true                     // ".." row; back and the path do the same
     private fun favorites(): Set<String> = settings.getStringSet("favs", null).orEmpty()
 
@@ -562,9 +565,10 @@ class MainActivity : Activity() {
         barCount.typeface = Typeface.DEFAULT_BOLD
         barCount.setTextColor(getColor(R.color.md_on_container))
         top.addView(barCount, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(pill(R.string.sel_all) { markAll(false) })
-        top.addView(pill(R.string.sel_invert) { markAll(true) })
-        top.addView(pill(R.string.sel_clear) { clearMarks() })
+        // Symbols instead of words: the count and size keep one line
+        top.addView(pill(R.drawable.ic_select_all, R.string.sel_all) { markAll(false) })
+        top.addView(pill(R.drawable.ic_select_invert, R.string.sel_invert) { markAll(true) })
+        top.addView(pill(R.drawable.ic_select_none, R.string.sel_clear) { clearMarks() })
         bar.addView(top)
         val acts = LinearLayout(this)
         acts.setPadding(0, dp(6), 0, 0)
@@ -627,16 +631,18 @@ class MainActivity : Activity() {
         menu.show()
     }
 
-    private fun pill(label: Int, onClick: () -> Unit) = TextView(this).apply {
-        setText(label)
-        textSize = 12f
-        setTextColor(getColor(R.color.md_on_container))
-        setPadding(dp(10), dp(4), dp(10), dp(4))
+    /** Round outlined symbol button; the label is its tooltip (hold) and what TalkBack reads. */
+    private fun pill(icon: Int, label: Int, onClick: () -> Unit) = ImageButton(this).apply {
+        setImageResource(icon)
+        imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.md_on_container))
+        scaleType = ImageView.ScaleType.CENTER
         background = GradientDrawable().apply {
-            cornerRadius = dp(14).toFloat()
+            shape = GradientDrawable.OVAL
             setStroke(dp(1), getColor(R.color.md_outline))
         }
-        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).also { it.marginStart = dp(6) }
+        contentDescription = getString(label)
+        tooltipText = getString(label)
+        layoutParams = LinearLayout.LayoutParams(dp(44), dp(44)).also { it.marginStart = dp(6) }
         setOnClickListener { onClick() }
     }
 
@@ -1091,13 +1097,24 @@ class MainActivity : Activity() {
         val tf = DateFormat.getTimeFormat(this)
         val namePaint = textPaint(15f)
         val metaPaint = textPaint(13f)
+        if (sizeColumn == 0f) {
+            // Widest size text Android writes (it switches unit above 900), plus a gap
+            sizeColumn = listOf(899L, 9_990L, 99_900L, 899_000L, 9_990_000L, 99_900_000L, 899_000_000L, 9_990_000_000L, 99_900_000_000L)
+                .maxOf { metaPaint.measureText(Formatter.formatShortFileSize(this, it)) } + dp(14)
+        }
         fun finish(e: Entry): Entry {
             if (e.up) {
                 e.width = namePaint.measureText(getString(R.string.up))
             } else {
-                e.meta = if (e.isDir) getString(R.string.items_count, 9999)
-                else Date(e.modified).let { Formatter.formatShortFileSize(this, e.size) + " · " + df.format(it) + " " + tf.format(it) }
-                e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
+                if (e.isDir) {
+                    e.meta = getString(R.string.items_count, 9999)
+                    e.width = maxOf(namePaint.measureText(e.file.name), metaPaint.measureText(e.meta)) + dp(20)
+                } else {
+                    // Size, tab, date: the tab stop (sizeColumn) puts every date at the same place
+                    val date = Date(e.modified).let { df.format(it) + " " + tf.format(it) }
+                    e.meta = Formatter.formatShortFileSize(this, e.size) + "\t" + date
+                    e.width = maxOf(namePaint.measureText(e.file.name), sizeColumn + metaPaint.measureText(date)) + dp(20)
+                }
             }
             return e
         }
@@ -1322,7 +1339,7 @@ class MainActivity : Activity() {
             setTextColor(getColor(R.color.md_on_surface))
         })
         val n = panes.firstOrNull { it.selected.isNotEmpty() }?.selected?.size ?: 0
-        val meta = panes.flatMap { it.entries }.firstOrNull { it.file == file && !it.isDir }?.meta ?: ""
+        val meta = panes.flatMap { it.entries }.firstOrNull { it.file == file && !it.isDir }?.meta?.replace("\t", " · ") ?: ""
         val more = if (n > 1) getString(R.string.menu_more_marked, n - 1) else ""
         texts.addView(TextView(this).apply {
             this.text = listOf(meta, more).filter { it.isNotEmpty() }.joinToString(" · ")
@@ -2170,7 +2187,7 @@ class MainActivity : Activity() {
             row.meta.text = when {
                 e.up -> ""
                 e.isDir -> childCount(f.path)?.let { getString(R.string.items_count, it) } ?: "…"
-                else -> e.meta
+                else -> SpannableString(e.meta).apply { setSpan(TabStopSpan.Standard(sizeColumn.toInt()), 0, length, Spanned.SPAN_INCLUSIVE_INCLUSIVE) }
             }
             p.fileList.applyTo(row)
             return row
