@@ -1,23 +1,27 @@
-<!-- Themed icon (Android 13+): folder outline and the two arrows in one colour. -->
+<!-- Themed icon (Android 13+): folder outline, the split and the two arrows in one colour. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Scaled to 70 % around the centre: the motif (45 x 36) stays inside the 66 dp safe circle. -->
+    <!-- Same motif as the foreground; a bit smaller because the outline stroke adds 2 units outside. -->
     <group
         android:pivotX="54"
         android:pivotY="54"
-        android:scaleX="0.7"
-        android:scaleY="0.7">
+        android:scaleX="1.07"
+        android:scaleY="1.07">
         <path
-            android:pathData="M25,30.5h19l6,7.5h33q2.5,0 2.5,2.5v37q0,2.5 -2.5,2.5h-58q-2.5,0 -2.5,-2.5v-44.5q0,-2.5 2.5,-2.5z"
-            android:strokeWidth="4.5"
+            android:pathData="M34,35h13.3q3,0 3,3v1h23.7q3,0 3,3v28q0,3 -3,3h-40q-3,0 -3,-3v-32q0,-3 3,-3z"
+            android:strokeWidth="4"
             android:strokeColor="#FFFFFF"
             android:strokeLineJoin="round" />
         <path
-            android:pathData="M36,50H70M64,43L72,50L64,57M72,66H38M44,59L36,66L44,73"
-            android:strokeWidth="6"
+            android:pathData="M54,45v26"
+            android:strokeWidth="3"
+            android:strokeColor="#FFFFFF" />
+        <path
+            android:pathData="M38,53h10M44,48.5l4.5,4.5l-4.5,4.5M70,63h-10M64,58.5l-4.5,4.5l4.5,4.5"
+            android:strokeWidth="3.5"
             android:strokeColor="#FFFFFF"
             android:strokeLineCap="round"
             android:strokeLineJoin="round" />

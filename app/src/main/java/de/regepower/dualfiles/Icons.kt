@@ -296,20 +296,51 @@ internal object AppBadges {
         return listOfNotNull(mono, icon.foreground, icon)
     }
 
+    /**
+     * The shape of [src] in white. Icon layers have a lot of empty margin (the launcher's safe zone), so the
+     * shape is cut to its own bounds and scaled up: every badge fills the same space on the file icon.
+     */
     private fun silhouette(src: Drawable): Bitmap? = try {
-        val bmp = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
-        src.setBounds(0, 0, SIZE, SIZE)
+        val big = SIZE * 2
+        val bmp = Bitmap.createBitmap(big, big, Bitmap.Config.ARGB_8888)
+        src.setBounds(0, 0, big, big)
         src.draw(Canvas(bmp))
-        val px = IntArray(SIZE * SIZE)
-        bmp.getPixels(px, 0, SIZE, 0, 0, SIZE, SIZE)
+        val px = IntArray(big * big)
+        bmp.getPixels(px, 0, big, 0, 0, big, big)
         var solid = 0
+        var left = big
+        var top = big
+        var right = -1
+        var bottom = -1
         for (i in px.indices) {
-            if (px[i] ushr 24 > 128) solid++
-            px[i] = (px[i] ushr 24 shl 24) or 0xFFFFFF
+            val a = px[i] ushr 24
+            if (a > 128) solid++
+            if (a > 40) {
+                val x = i % big
+                val y = i / big
+                if (x < left) left = x
+                if (x > right) right = x
+                if (y < top) top = y
+                if (y > bottom) bottom = y
+            }
+            px[i] = (a shl 24) or 0xFFFFFF
         }
         val share = solid.toFloat() / px.size
-        if (share < 0.03f || share > 0.8f) null
-        else bmp.apply { setPixels(px, 0, SIZE, 0, 0, SIZE, SIZE) }
+        if (share < 0.03f || share > 0.8f || right < left) null
+        else {
+            bmp.setPixels(px, 0, big, 0, 0, big, big)
+            // Square around the shape, centred, with a little air
+            val side = (max(right - left, bottom - top) + 1) * 1.08f
+            val cx = (left + right + 1) / 2f
+            val cy = (top + bottom + 1) / 2f
+            val out = Bitmap.createBitmap(SIZE, SIZE, Bitmap.Config.ARGB_8888)
+            Canvas(out).drawBitmap(
+                bmp, android.graphics.Rect((cx - side / 2).roundToInt(), (cy - side / 2).roundToInt(), (cx + side / 2).roundToInt(), (cy + side / 2).roundToInt()),
+                RectF(0f, 0f, SIZE.toFloat(), SIZE.toFloat()), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG),
+            )
+            bmp.recycle()
+            out
+        }
     } catch (e: Exception) {
         null
     }
