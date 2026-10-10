@@ -646,6 +646,8 @@ class MainActivity : Activity() {
         list.setOnItemClickListener { _, _, pos, _ ->
             val e = p.entries[pos]
             when {
+                // Marking mode: while something is marked here, a tap marks too (no accidental opening)
+                !e.up && p.selected.isNotEmpty() -> toggle(p, e.file)
                 e.up || e.isDir || Archive.isArchive(e.file) -> open(p, e.file)
                 p.inArchive -> openFromArchive(e.file)
                 else -> withLocal(listOf(e.file)) { openFile(it[0]) }
