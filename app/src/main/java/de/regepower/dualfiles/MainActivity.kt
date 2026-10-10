@@ -312,8 +312,8 @@ class MainActivity : Activity() {
     private lateinit var barCount: TextView
     private val tabs = ArrayList<TextView>()
     private var roots: List<File> = emptyList()
-    private fun allRoots() = roots + Saf.rootFiles(this)
-    private fun rootName(r: File) = rootNames[r.path] ?: if (Saf.isSaf(r)) Saf.name(this, r) else r.name
+    private fun allRoots() = roots + Vfs.rootFiles(this)
+    private fun rootName(r: File) = rootNames[r.path] ?: if (Vfs.isVirtual(r)) Vfs.name(this, r) else r.name
     private val rootNames = HashMap<String, String>()
     private val loader = Executors.newSingleThreadExecutor()   // directory reads, off the UI thread
     private val counter = Executors.newSingleThreadExecutor()  // folder item counts
@@ -393,6 +393,7 @@ class MainActivity : Activity() {
         mainView.visibility = if (ok) View.VISIBLE else View.GONE
         permView.visibility = if (ok) View.GONE else View.VISIBLE
         assocCache.clear()
+        Net.refresh()
         if (ok) refreshAll()
         pendingApk?.let {
             pendingApk = null
@@ -524,16 +525,21 @@ class MainActivity : Activity() {
         val current = roots.indexOfFirst { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") }
         val labels = roots.map { r ->
             when {
+                Net.isNet(r) -> "🌐 " + rootName(r)
                 Saf.isSaf(r) -> "☁ " + rootName(r)
                 rootNames[r.path] == getString(R.string.loc_internal) -> "📱 " + rootName(r)
                 else -> "💾 " + rootName(r)
             }
-        } + getString(R.string.loc_add)
+        } + getString(R.string.loc_add) + getString(R.string.net_add)
         AlertDialog.Builder(this)
             .setTitle(R.string.loc_title)
             .setSingleChoiceItems(labels.toTypedArray(), current) { d, which ->
                 d.dismiss()
-                if (which < roots.size) open(p, roots[which]) else pickTree()
+                when {
+                    which < roots.size -> open(p, roots[which])
+                    which == roots.size -> pickTree()
+                    else -> NetSetup.show(this) { root -> refreshAll(); open(p, root) }
+                }
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -608,7 +614,7 @@ class MainActivity : Activity() {
             when {
                 e.up || e.isDir || Archive.isArchive(e.file) -> open(p, e.file)
                 p.inArchive -> openFromArchive(e.file)
-                else -> openFile(e.file)
+                else -> withLocal(listOf(e.file)) { openFile(it[0]) }
             }
         }
         // Long press: menu for the held entry (it gets marked, so copy/move/delete apply to it).
@@ -689,7 +695,7 @@ class MainActivity : Activity() {
     }
 
     private fun open(p: Pane, dir: File) {
-        if (!Saf.isSaf(dir) && !Archive.inside(dir) && !dir.canRead()) return
+        if (!Vfs.isVirtual(dir) && !Archive.inside(dir) && !dir.canRead()) return
         p.dir = dir
         p.selected.clear()
         expandTo(p, dir)
@@ -803,7 +809,7 @@ class MainActivity : Activity() {
             Archive.children(arc, inner).filter { it.isDir }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
         }
         // Archives show up in the tree below their folder and open like folders
-        else if (Saf.isSaf(f)) Saf.list(this, f).filter { it.isDir && visible(it.name) }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
+        else if (Vfs.isVirtual(f)) Vfs.list(this, f).filter { it.isDir && visible(it.name) }.map { File(f, it.name) }.sortedBy { it.name.lowercase() }
         else f.listFiles { x -> visible(x.name) && (x.isDirectory || Archive.isArchive(x)) }.orEmpty().sortedBy { it.name.lowercase() }
 
     /** Names starting with a dot are hidden unless the setting shows them. */
@@ -832,9 +838,9 @@ class MainActivity : Activity() {
             out.addAll(items.sortedWith(compareBy({ !it.isDir }, { it.key })))
             return out
         }
-        if (Saf.isSaf(dir)) {
+        if (Vfs.isVirtual(dir)) {
             if (showUp) dir.parentFile?.let { out.add(finish(Entry(it, true, isDir = true))) }
-            val docs = Saf.list(this, dir).filter { visible(it.name) }.map { d ->
+            val docs = Vfs.list(this, dir).filter { visible(it.name) }.map { d ->
                 finish(Entry(File(dir, d.name), false, d.isDir, d.size, d.modified))
             }
             out.addAll(docs.sortedWith(compareBy({ !it.isDir }, { it.key })))
@@ -918,11 +924,15 @@ class MainActivity : Activity() {
         updateCrumbs(p)
         loader.execute {
             val nodes = buildNodes(expanded, favs)
-            val virtual = Saf.isSaf(dir) || Archive.inside(dir)
+            val virtual = Vfs.isVirtual(dir) || Archive.inside(dir)
             val showUp = allRoots().none { it.path == dir.path } && (virtual && dir.parentFile != null || dir.parentFile?.canRead() == true)
             val entries = buildEntries(dir, showUp)
             runOnUiThread {
                 if (gen != p.gen || isFinishing) return@runOnUiThread
+                Net.lastError?.let {
+                    Net.lastError = null
+                    Toast.makeText(this, getString(R.string.net_error, it), Toast.LENGTH_LONG).show()
+                }
                 p.nodes = nodes
                 p.raw = entries
                 p.entries = viewOf(p)
@@ -967,7 +977,7 @@ class MainActivity : Activity() {
                 val arc = Archive.split(f)
                 val n = when {
                     arc != null -> Archive.children(arc.first, arc.second).size
-                    Saf.isSaf(f) -> Saf.list(this, f).size
+                    Vfs.isVirtual(f) -> Vfs.list(this, f).size
                     else -> f.list()?.size ?: 0
                 }
                 runOnUiThread {
@@ -1034,9 +1044,9 @@ class MainActivity : Activity() {
             .setTitle(getString(R.string.selected_count, n))
             .setItems(labels.toTypedArray()) { _, which ->
                 when (actions[which]) {
-                    3 -> openWith(file)
+                    3 -> withLocal(listOf(file)) { openWith(it[0]) }
                     4 -> shareSelected()
-                    5 -> FilePrint.print(this, uriFor(file), file.name, mime ?: "*/*")
+                    5 -> withLocal(listOf(file)) { FilePrint.print(this, uriFor(it[0]), file.name, mime ?: "*/*") }
                     6 -> askName(R.string.rename, file.name) { name -> runOp { Transfer.rename(this, file, name) } }
                     7 -> askExtract(file, listOf(""))
                     9 -> viewFile(file)
@@ -1210,6 +1220,7 @@ class MainActivity : Activity() {
                     Archive.Result(if (copy == null) R.string.arc_read else null)
                 }
             }
+            Net.isNet(f) -> withLocal(listOf(f)) { startActivity(i.putExtra(ViewerActivity.EXTRA_PATH, it[0].path)) }
             Saf.isSaf(f) -> Thread {
                 val uri = Saf.docUri(this, f)
                 runOnUiThread {
@@ -1384,6 +1395,27 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /**
+     * Network files are downloaded to the cache first (with progress) so other apps can read them;
+     * [then] gets the files to use. Other files are passed on as they are.
+     */
+    private fun withLocal(files: List<File>, then: (List<File>) -> Unit) {
+        if (files.none { Net.isNet(it) }) return then(files)
+        var local: List<File> = emptyList()
+        runArchive(R.string.net_loading, quiet = true, then = { then(local) }) { pr ->
+            val m = Meter(pr)
+            m.total = files.sumOf { if (Net.isNet(it)) Vfs.stat(this, it)?.size ?: 0 else 0 }
+            val base = File(cacheDir, "net").apply { deleteRecursively(); mkdirs() }
+            local = files.mapIndexed { i, f ->
+                if (!Net.isNet(f)) return@mapIndexed f
+                val dir = File(base, i.toString()).apply { mkdirs() }
+                if (!Transfer.copy(this, f, dir, false, m)) return@runArchive Archive.Result(if (m.cancelled) R.string.arc_cancelled else R.string.arc_read)
+                File(dir, f.name)
+            }
+            Archive.Result(null)
+        }
+    }
+
     /** Content uri another app can read: our own provider for local files, the provider's uri for Saf files. */
     private fun uriFor(f: File): Uri =
         if (Saf.isSaf(f)) Saf.docUri(this, f) ?: Uri.EMPTY
@@ -1396,7 +1428,10 @@ class MainActivity : Activity() {
     /** Shares the marked files (folders are skipped) through Android's share sheet. */
     private fun shareSelected() {
         val p = panes.firstOrNull { it.selected.isNotEmpty() } ?: return
-        val files = p.entries.filter { !it.up && !it.isDir && p.selected.contains(it.file) }.map { it.file }
+        withLocal(p.entries.filter { !it.up && !it.isDir && p.selected.contains(it.file) }.map { it.file }) { shareFiles(it) }
+    }
+
+    private fun shareFiles(files: List<File>) {
         val uris = ArrayList(files.map { uriFor(it) }.filter { it != Uri.EMPTY })
         if (uris.isEmpty()) return
         val send = if (uris.size == 1) {
@@ -1529,7 +1564,7 @@ class MainActivity : Activity() {
     }
 
     private fun showRemoveSaf() {
-        val folders = Saf.rootFiles(this)
+        val folders = Vfs.rootFiles(this)
         if (folders.isEmpty()) {
             AlertDialog.Builder(this).setMessage(R.string.saf_none).setPositiveButton(R.string.help_ok, null).show()
             return
@@ -1537,7 +1572,7 @@ class MainActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle(R.string.saf_remove)
             .setItems(folders.map { rootName(it) }.toTypedArray()) { _, which ->
-                Saf.remove(this, folders[which])
+                Vfs.remove(this, folders[which])
                 refreshAll()
             }
             .setNegativeButton(R.string.cancel, null)

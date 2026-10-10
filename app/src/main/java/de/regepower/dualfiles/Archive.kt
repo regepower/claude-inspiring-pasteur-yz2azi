@@ -70,11 +70,11 @@ internal object Archive {
     fun isArchiveName(f: File) = f.extension.lowercase() in EXTS
 
     /** A local archive file that can be opened like a folder. */
-    fun isArchive(f: File) = !Saf.isSaf(f) && isArchiveName(f) && f.isFile
+    fun isArchive(f: File) = !Vfs.isVirtual(f) && isArchiveName(f) && f.isFile
 
     /** For a path inside an archive (or the archive itself): the archive file and the inner path ("" = top). */
     fun split(f: File): Pair<File, String>? {
-        if (Saf.isSaf(f)) return null
+        if (Vfs.isVirtual(f)) return null
         var cur: File? = f
         while (cur != null) {
             if (isArchiveName(cur) && cur.isFile) {
@@ -187,18 +187,18 @@ internal object Archive {
     ): Result {
         val work = File(ctx.cacheDir, "archive").apply { deleteRecursively(); mkdirs() }
         try {
-            val local = if (Saf.isSaf(archive)) {
+            val local = if (Vfs.isVirtual(archive)) {
                 val copy = File(work, "in." + archive.extension)
                 val input = Transfer.openInput(ctx, archive) ?: return Result(R.string.arc_read)
                 input.use { i -> copy.outputStream().use { i.copyTo(it) } }
                 copy
             } else archive
             val l = listing(local)
-            if (Saf.isSaf(archive)) synchronized(cache) { cache.remove(local.path) }
+            if (Vfs.isVirtual(archive)) synchronized(cache) { cache.remove(local.path) }
             l.error?.let { return Result(it) }
 
             // Output name for every wanted entry, relative to the output folder
-            val toSaf = Saf.isSaf(dstDir)
+            val toSaf = Vfs.isVirtual(dstDir)
             val out = if (toSaf) File(work, "out").apply { mkdirs() } else dstDir
             val tops = HashMap<String, String?>()  // top-level name -> name in out (null = skipped)
             val names = arrayOfNulls<String>(l.count)
@@ -344,7 +344,7 @@ internal object Archive {
             return done
         }
         val entry = ZipEntry(path)
-        if (!Saf.isSaf(f)) entry.time = f.lastModified()
+        if (!Vfs.isVirtual(f)) entry.time = f.lastModified()
         z.putNextEntry(entry)
         val input = Transfer.openInput(ctx, f) ?: throw IOException("unreadable")
         val done = input.use { copy(it, z, start, total, progress) } ?: return null

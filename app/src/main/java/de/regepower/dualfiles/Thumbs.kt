@@ -63,6 +63,7 @@ internal object Thumbs {
 
     private fun make(ctx: Context, f: File): Bitmap? {
         val size = Size(SIZE, SIZE)
+        if (Net.isNet(f)) return null   // no previews over the network: each would download the whole file
         if (Saf.isSaf(f)) {
             val uri = Saf.docUri(ctx, f) ?: return null
             return ctx.contentResolver.loadThumbnail(uri, size, null)

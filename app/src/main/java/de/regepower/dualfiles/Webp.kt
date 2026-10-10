@@ -26,7 +26,7 @@ internal object Webp {
         val work = File(ctx.cacheDir, "webp").apply { deleteRecursively(); mkdirs() }
         try {
             // Saf pictures are decoded from a cache copy
-            val local = if (Saf.isSaf(src)) {
+            val local = if (Vfs.isVirtual(src)) {
                 val copy = File(work, "in." + src.extension)
                 val input = Transfer.openInput(ctx, src) ?: return false
                 input.use { i -> copy.outputStream().use { i.copyTo(it) } }
@@ -48,7 +48,7 @@ internal object Webp {
             if (NativeLib.ok && local.extension.lowercase() in setOf("jpg", "jpeg")) {
                 NativeLib.jpegExif(local.path)?.let { NativeLib.webpAddExif(out.path, it, w, h, alpha) }
             }
-            if (!Saf.isSaf(src)) out.setLastModified(src.lastModified())
+            if (!Vfs.isVirtual(src)) out.setLastModified(src.lastModified())
             return Transfer.copy(ctx, out, dstDir, overwrite)
         } catch (e: IOException) {
             return false

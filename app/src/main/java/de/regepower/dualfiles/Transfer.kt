@@ -59,7 +59,7 @@ internal object Transfer {
 
     /** [overwrite]: an existing file of the same name is replaced, an existing folder is merged into. */
     fun copy(ctx: Context, src: File, dstDir: File, overwrite: Boolean = false, m: Meter? = null): Boolean {
-        if (!Saf.isSaf(src) && !Saf.isSaf(dstDir)) return FileOps.copy(src, dstDir, overwrite, m)
+        if (!Vfs.isVirtual(src) && !Vfs.isVirtual(dstDir)) return FileOps.copy(src, dstDir, overwrite, m)
         // Refuse to copy a folder into itself
         if (isDirectory(ctx, src) == true && (dstDir.path == src.path || dstDir.path.startsWith(src.path + "/"))) return false
         return try {
@@ -71,14 +71,14 @@ internal object Transfer {
 
     fun move(ctx: Context, src: File, dstDir: File, overwrite: Boolean = false, m: Meter? = null): Boolean {
         if (src.parentFile?.path == dstDir.path) return true
-        if (!Saf.isSaf(src) && !Saf.isSaf(dstDir)) return FileOps.move(src, dstDir, overwrite, m)
+        if (!Vfs.isVirtual(src) && !Vfs.isVirtual(dstDir)) return FileOps.move(src, dstDir, overwrite, m)
         // Only delete the source once the whole copy succeeded
         return copy(ctx, src, dstDir, overwrite, m) && delete(ctx, src)
     }
 
     /** [m] counts one per deleted entry. */
     fun delete(ctx: Context, f: File, m: Meter? = null): Boolean {
-        if (!Saf.isSaf(f)) return FileOps.delete(f, m)
+        if (!Vfs.isVirtual(f)) return FileOps.delete(f, m)
         if (m?.cancelled == true) return false
         var ok = true
         if (isDirectory(ctx, f) == true) {
@@ -88,7 +88,7 @@ internal object Transfer {
             }
             if (!ok) return false
         }
-        val gone = Saf.delete(ctx, f)
+        val gone = Vfs.delete(ctx, f)
         m?.add(1)
         return gone
     }
@@ -96,7 +96,7 @@ internal object Transfer {
     /** Bytes in [f] (with everything below it). */
     fun size(ctx: Context, f: File): Long = when {
         isDirectory(ctx, f) == true -> children(ctx, f).sumOf { size(ctx, it) }
-        Saf.isSaf(f) -> Saf.stat(ctx, f)?.size ?: 0
+        Vfs.isVirtual(f) -> Vfs.stat(ctx, f)?.size ?: 0
         else -> f.length()
     }
 
@@ -109,14 +109,14 @@ internal object Transfer {
         if (name.isEmpty() || name.contains('/') || name == "." || name == "..") return false
         val parent = f.parentFile ?: return false
         if (isDirectory(ctx, File(parent, name)) != null) return false
-        return if (Saf.isSaf(f)) Saf.rename(ctx, f, name) else f.renameTo(File(parent, name))
+        return if (Vfs.isVirtual(f)) Vfs.rename(ctx, f, name) else f.renameTo(File(parent, name))
     }
 
     /** Creates the folder [name] in [dir]; false if it exists or cannot be created. */
     fun mkdir(ctx: Context, dir: File, name: String): Boolean {
         if (name.isEmpty() || name.contains('/') || name == "." || name == "..") return false
         if (isDirectory(ctx, File(dir, name)) != null) return false
-        return if (Saf.isSaf(dir)) Saf.createChild(ctx, dir, name, true) != null else File(dir, name).mkdir()
+        return if (Vfs.isVirtual(dir)) Vfs.createChild(ctx, dir, name, true) != null else File(dir, name).mkdir()
     }
 
     private fun copyTree(ctx: Context, src: File, dstDir: File, overwrite: Boolean, m: Meter?): Boolean {
@@ -136,16 +136,16 @@ internal object Transfer {
 
     /** null if [f] does not exist. */
     fun isDirectory(ctx: Context, f: File): Boolean? =
-        if (Saf.isSaf(f)) Saf.stat(ctx, f)?.isDir
+        if (Vfs.isVirtual(f)) Vfs.stat(ctx, f)?.isDir
         else if (f.exists()) f.isDirectory
         else null
 
     fun children(ctx: Context, f: File): List<File> =
-        if (Saf.isSaf(f)) Saf.list(ctx, f).map { File(f, it.name) }
+        if (Vfs.isVirtual(f)) Vfs.list(ctx, f).map { File(f, it.name) }
         else f.listFiles().orEmpty().toList()
 
     fun createChild(ctx: Context, dir: File, name: String, isDir: Boolean): File? =
-        if (Saf.isSaf(dir)) Saf.createChild(ctx, dir, name, isDir)
+        if (Vfs.isVirtual(dir)) Vfs.createChild(ctx, dir, name, isDir)
         else {
             val t = FileOps.uniqueTarget(dir, name)
             if (isDir) t.takeIf { it.mkdirs() } else t.takeIf { it.createNewFile() }
@@ -167,10 +167,10 @@ internal object Transfer {
     }
 
     fun openInput(ctx: Context, f: File): InputStream? =
-        if (Saf.isSaf(f)) Saf.docUri(ctx, f)?.let { ctx.contentResolver.openInputStream(it) }
+        if (Vfs.isVirtual(f)) Vfs.openInput(ctx, f)
         else FileInputStream(f)
 
     fun openOutput(ctx: Context, f: File): OutputStream? =
-        if (Saf.isSaf(f)) Saf.docUri(ctx, f)?.let { ctx.contentResolver.openOutputStream(it, "wt") }
+        if (Vfs.isVirtual(f)) Vfs.openOutput(ctx, f)
         else FileOutputStream(f)
 }

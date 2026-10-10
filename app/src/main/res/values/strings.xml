@@ -143,4 +143,26 @@
     <string name="loc_internal">Internal</string>
     <string name="loc_title">Storage</string>
     <string name="loc_add">+ Add cloud / drive (Google Drive, other apps)…</string>
+    <string name="net_ftp" translatable="false">FTP</string>
+    <string name="net_ftps">FTPS (explicit TLS)</string>
+    <string name="net_ftps_implicit">FTPS (implicit, port 990)</string>
+    <string name="net_davs">WebDAV (HTTPS)</string>
+    <string name="net_dav">WebDAV (HTTP, unencrypted)</string>
+    <string name="net_host">Server (name or IP)</string>
+    <string name="net_port">Port</string>
+    <string name="net_path">Start folder (optional, e.g. remote.php/dav/files/me)</string>
+    <string name="net_user">User (empty = anonymous)</string>
+    <string name="net_password">Password</string>
+    <string name="net_name">Name in the list (optional)</string>
+    <string name="net_insecure">Do not check the certificate (own NAS)</string>
+    <string name="net_title">Network server</string>
+    <string name="net_save">Test and save</string>
+    <string name="net_search">Search in Wi-Fi</string>
+    <string name="net_testing">Connecting…</string>
+    <string name="net_error">Server: %1$s</string>
+    <string name="net_searching">Searching for servers in the local network…</string>
+    <string name="net_none_found">No server found (many only announce SMB)</string>
+    <string name="net_found">Found servers</string>
+    <string name="net_add">+ Network server (FTP / WebDAV)…</string>
+    <string name="net_loading">Loading from the server…</string>
 </resources>
