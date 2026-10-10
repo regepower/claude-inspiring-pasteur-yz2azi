@@ -78,6 +78,8 @@ private enum class Filter(val label: Int, val exts: Set<String>? = null) {
     VIDEO(R.string.filter_video, setOf("mp4", "mkv", "avi", "mov", "webm", "3gp")),
     AUDIO(R.string.filter_audio, setOf("mp3", "m4a", "ogg", "wav", "flac", "opus", "aac")),
     DOCS(R.string.filter_docs, setOf("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "odt", "rtf", "csv")),
+    ARCHIVES(R.string.filter_archives, setOf("zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst", "jar")),
+    APKS(R.string.filter_apks, setOf("apk", "apks", "xapk", "apkm")),
 }
 
 /** One row of the folder tree; [width] is the name's width in px. */
@@ -1389,6 +1391,8 @@ class MainActivity : Activity() {
         if (!inArchive) {
             group(R.string.menu_archive)
             if (!isDir && Archive.isArchiveName(file)) entry(R.string.arc_extract, 7)
+            // An APK is a ZIP file: its contents (manifest, resources, libraries) can be unpacked
+            if (!isDir && file.extension.lowercase() == "apk") entry(R.string.arc_extract_zip, 7)
             entry(R.string.arc_zip, 8)
             if (selectedOr(file).any { Webp.canConvert(it) }) {
                 group(R.string.menu_picture)
@@ -1600,7 +1604,7 @@ class MainActivity : Activity() {
                 // Names that will appear in the target (only known for archives we can list)
                 val tops = when {
                     folder != null -> listOf(folder)
-                    !Archive.isArchive(archive) -> emptyList()
+                    Vfs.isVirtual(archive) || !archive.isFile -> emptyList()
                     selected == listOf("") -> Archive.children(archive, "").map { it.name }
                     else -> selected.map { it.substringAfterLast('/') }
                 }
