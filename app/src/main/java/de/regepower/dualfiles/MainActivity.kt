@@ -103,6 +103,7 @@ private class Pane(val color: Int, val bandRes: Int, var dir: File) {
     var nodes: List<Node> = emptyList()
     var entries: List<Entry> = emptyList()
     lateinit var fileBand: CrumbBar
+    lateinit var location: TextView       // storage chooser left of the breadcrumb
     lateinit var treeAdapter: BaseAdapter
     lateinit var fileAdapter: BaseAdapter
     lateinit var treeList: PanList
@@ -287,8 +288,10 @@ private class CrumbBar(ctx: Context) : HorizontalScrollView(ctx) {
     init {
         isHorizontalScrollBarEnabled = false
         overScrollMode = OVER_SCROLL_NEVER
+        // A short path fills the width and sits at the right end
+        isFillViewport = true
         row.orientation = LinearLayout.HORIZONTAL
-        row.gravity = Gravity.CENTER_VERTICAL
+        row.gravity = Gravity.CENTER_VERTICAL or Gravity.END
         addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
     }
 
@@ -329,7 +332,8 @@ class MainActivity : Activity() {
         val sm = getSystemService(StorageManager::class.java)
         val vols = sm.storageVolumes.filter { it.directory != null && it.state == Environment.MEDIA_MOUNTED }
         roots = vols.mapNotNull { it.directory }
-        for (v in vols) rootNames[v.directory!!.path] = v.getDescription(this)
+        // Short names: "Intern" instead of "Interner gemeinsamer Speicher"
+        for (v in vols) rootNames[v.directory!!.path] = if (v.isPrimary) getString(R.string.loc_internal) else v.getDescription(this)
         val primary = roots.firstOrNull() ?: Environment.getExternalStorageDirectory()
         val download = File(primary, "Download")
         panes = arrayOf(
@@ -489,7 +493,62 @@ class MainActivity : Activity() {
         return b
     }
 
-    private fun band(p: Pane): CrumbBar = CrumbBar(this).apply { setBackgroundColor(p.color) }
+    /** Coloured band: storage chooser (fixed) and the path (right-aligned, the current folder always visible). */
+    private fun band(p: Pane): View {
+        val row = LinearLayout(this)
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setBackgroundColor(p.color)
+        p.location = TextView(this).apply {
+            textSize = 13f
+            maxLines = 1
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = GradientDrawable().apply {
+                cornerRadius = dp(8).toFloat()
+                setColor(0x33000000)
+            }
+            setOnClickListener { showLocations(p) }
+        }
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(dp(6), dp(4), dp(2), dp(4))
+        row.addView(p.location, lp)
+        p.fileBand = CrumbBar(this)
+        row.addView(p.fileBand, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        return row
+    }
+
+    /** Storage locations: phone, SD/USB, chosen cloud folders (Drive, apps' providers), and adding one. */
+    private fun showLocations(p: Pane) {
+        val roots = allRoots()
+        val current = roots.indexOfFirst { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") }
+        val labels = roots.map { r ->
+            when {
+                Saf.isSaf(r) -> "☁ " + rootName(r)
+                rootNames[r.path] == getString(R.string.loc_internal) -> "📱 " + rootName(r)
+                else -> "💾 " + rootName(r)
+            }
+        } + getString(R.string.loc_add)
+        AlertDialog.Builder(this)
+            .setTitle(R.string.loc_title)
+            .setSingleChoiceItems(labels.toTypedArray(), current) { d, which ->
+                d.dismiss()
+                if (which < roots.size) open(p, roots[which]) else pickTree()
+            }
+            .setNegativeButton(R.string.cancel, null)
+            .show()
+    }
+
+    /** Android's folder picker: Google Drive and other apps' storage, kept with read/write access. */
+    private fun pickTree() {
+        startActivityForResult(
+            Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+            ),
+            REQ_TREE
+        )
+    }
 
     private fun <T : ListView> styledList(l: T): T {
         l.divider = ColorDrawable(getColor(R.color.md_outline) and 0x55FFFFFF)
@@ -525,8 +584,7 @@ class MainActivity : Activity() {
     private fun buildFiles(p: Pane): View {
         val page = LinearLayout(this)
         page.orientation = LinearLayout.VERTICAL
-        p.fileBand = band(p)
-        page.addView(p.fileBand)
+        page.addView(band(p))
         val chips = LinearLayout(this)
         chips.setPadding(dp(6), dp(6), dp(6), dp(6))
         p.sortChip = chip { showSortDialog(p) }
@@ -818,8 +876,8 @@ class MainActivity : Activity() {
     private fun updateCrumbs(p: Pane) {
         val bar = p.fileBand
         bar.row.removeAllViews()
-        bar.row.addView(crumbText(getString(p.bandRes), null))
         val root = allRoots().firstOrNull { p.dir.path == it.path || p.dir.path.startsWith(it.path + "/") } ?: p.dir
+        p.location.text = rootName(root) + " ▾"
         val parts = ArrayList<File>()
         parts.add(root)
         var cur = root
@@ -827,11 +885,17 @@ class MainActivity : Activity() {
             cur = File(cur, name)
             parts.add(cur)
         }
+        // The storage itself is the chooser on the left; the path starts below it
         for ((i, dir) in parts.withIndex()) {
-            bar.row.addView(crumbText(" › ", null))
-            bar.row.addView(crumbText(if (i == 0) rootName(root) else dir.name) { open(p, dir) })
+            if (i == 0) {
+                bar.row.addView(crumbText("/", null).apply { setOnClickListener { open(p, dir) } })
+                continue
+            }
+            if (i > 1) bar.row.addView(crumbText(" › ", null))
+            bar.row.addView(crumbText(dir.name) { open(p, dir) })
         }
-        bar.scrollTo(0, 0)
+        // Right-aligned: show the end of the path (the current folder)
+        bar.post { bar.scrollTo(bar.row.width, 0) }
     }
 
     private fun crumbText(label: String, onClick: (() -> Unit)? = null) = TextView(this).apply {
@@ -1431,13 +1495,7 @@ class MainActivity : Activity() {
             .setItems(items) { _, which ->
                 when (which) {
                     0 -> showAssociations()
-                    1 -> startActivityForResult(
-                        Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                                Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
-                        ),
-                        REQ_TREE
-                    )
+                    1 -> pickTree()
                     2 -> showRemoveSaf()
                     3 -> startActivityForResult(
                         Intent(Intent.ACTION_CREATE_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE)
