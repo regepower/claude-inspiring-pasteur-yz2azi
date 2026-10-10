@@ -28,12 +28,33 @@ internal class TextGrid(context: Context) : View(context) {
         fun row(i: Int): String
         /** Widest row in characters (for the sideways range). */
         fun maxChars(): Int
+        /** Line number shown left of row [i] ("" for a wrapped continuation). */
+        fun label(i: Int): String = ""
+        /** True when row [i + 1] continues row [i] (wrapped line): copied without a line break. */
+        fun joinsNext(i: Int): Boolean = false
     }
+
+    /** Characters reserved for line numbers at the left (0 = none). */
+    var gutterChars = 0
+        set(v) {
+            field = v
+            clampScroll()
+            invalidate()
+            onRange?.invoke()
+        }
+
+    private fun gutter(): Float = if (gutterChars > 0) gutterChars * charW + pad else 0f
+    private fun left(): Float = pad + gutter()
+
+    /** Characters that fit beside the line numbers (for wrapping). */
+    fun columns(): Int = max(8, ((width - left() - pad) / max(1f, charW)).toInt())
 
     var source: Source? = null
     var onRange: (() -> Unit)? = null
     var onSelection: ((Boolean) -> Unit)? = null
     var onZoom: ((Float) -> Unit)? = null
+    /** The number of [columns] may have changed (size, zoom, line numbers): wrapped text must be redone. */
+    var onColumns: (() -> Unit)? = null
 
     private val density = context.resources.displayMetrics.density
     private val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply { typeface = Typeface.MONOSPACE }
@@ -75,7 +96,15 @@ internal class TextGrid(context: Context) : View(context) {
         isFocusable = true
     }
 
-    fun setColors(text: Int, mark: Int, handle: Int) {
+    private val gutterPaint = Paint()
+    private val labelPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+        typeface = Typeface.MONOSPACE
+        textAlign = Paint.Align.RIGHT
+    }
+
+    fun setColors(text: Int, mark: Int, handle: Int, background: Int = 0, label: Int = text) {
+        gutterPaint.color = background
+        labelPaint.color = label
         paint.color = text
         markPaint.color = mark
         handlePaint.color = handle
@@ -96,7 +125,7 @@ internal class TextGrid(context: Context) : View(context) {
 
     // ---- Geometry ----
 
-    fun contentWidth(): Double = (source?.maxChars() ?: 0) * charW.toDouble() + 2 * pad
+    fun contentWidth(): Double = (source?.maxChars() ?: 0) * charW.toDouble() + left() + pad
     fun contentHeight(): Double = (source?.count() ?: 0) * lineH.toDouble() + pad
     fun rowsVisible(): Int = max(1, (height / lineH).toInt())
     fun firstRow(): Int = (scrollYf / lineH).toInt()
@@ -146,11 +175,20 @@ internal class TextGrid(context: Context) : View(context) {
             if (selecting && i in sr..er) {
                 val from = if (i == sr) sc.coerceAtMost(text.length) else 0
                 val to = if (i == er) ec.coerceAtMost(text.length) else text.length
-                val x1 = pad + paint.measureText(text, 0, from) - sx
-                val x2 = pad + paint.measureText(text, 0, max(from, to)) - sx + if (i != er) charW / 2 else 0f
+                val x1 = left() + paint.measureText(text, 0, from) - sx
+                val x2 = left() + paint.measureText(text, 0, max(from, to)) - sx + if (i != er) charW / 2 else 0f
                 canvas.drawRect(x1, y, max(x2, x1 + if (i != er) charW / 2 else 0f), y + lineH, markPaint)
             }
-            canvas.drawText(text, pad - sx, y + baseShift, paint)
+            canvas.drawText(text, left() - sx, y + baseShift, paint)
+        }
+        if (gutterChars > 0) {
+            // Line numbers stay in place when the text moves sideways
+            canvas.drawRect(0f, 0f, gutter(), height.toFloat(), gutterPaint)
+            labelPaint.textSize = paint.textSize * 0.85f
+            for (i in first..last) {
+                val y = (i * lineH.toDouble() - scrollYf).toFloat()
+                canvas.drawText(src.label(i), gutter() - pad / 2, y + baseShift, labelPaint)
+            }
         }
         if (selecting) {
             drawHandle(canvas, sr, sc)
@@ -160,7 +198,7 @@ internal class TextGrid(context: Context) : View(context) {
 
     private fun handlePos(row: Int, col: Int): Pair<Float, Float> {
         val text = source?.row(row) ?: ""
-        val x = pad + paint.measureText(text, 0, col.coerceAtMost(text.length)) - scrollXf.toFloat()
+        val x = left() + paint.measureText(text, 0, col.coerceAtMost(text.length)) - scrollXf.toFloat()
         val y = ((row + 1) * lineH.toDouble() - scrollYf).toFloat()
         return Pair(x, y)
     }
@@ -184,7 +222,7 @@ internal class TextGrid(context: Context) : View(context) {
         val count = source?.count() ?: 0
         val row = ((y + scrollYf) / lineH).toInt().coerceIn(0, max(0, count - 1))
         val text = source?.row(row) ?: ""
-        val adv = (x + scrollXf - pad).toFloat()
+        val adv = (x + scrollXf - left()).toFloat()
         val col = if (adv <= 0) 0 else paint.getOffsetForAdvance(text, 0, text.length, 0, text.length, false, adv)
         return Pair(row, col.coerceIn(0, text.length))
     }
@@ -228,7 +266,7 @@ internal class TextGrid(context: Context) : View(context) {
             val from = if (i == sr) sc.coerceAtMost(t.length) else 0
             val to = if (i == er) ec.coerceAtMost(t.length) else t.length
             sb.append(t, from, max(from, to))
-            if (i != er) sb.append('\n')
+            if (i != er && !src.joinsNext(i)) sb.append('\n')
             if (sb.length > maxChars) return null
         }
         return sb.toString()
@@ -283,9 +321,9 @@ internal class TextGrid(context: Context) : View(context) {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
             // Keep the row under the fingers in place while the size changes
             val focusRow = (scrollYf + detector.focusY) / lineH
-            val focusCol = (scrollXf + detector.focusX - pad) / max(1f, charW)
+            val focusCol = (scrollXf + detector.focusX - left()) / max(1f, charW)
             setTextSizeSp(textSizeSp * detector.scaleFactor)
-            scrollXf = focusCol * charW + pad - detector.focusX.toDouble()
+            scrollXf = focusCol * charW + left() - detector.focusX.toDouble()
             scrollYf = focusRow * lineH - detector.focusY.toDouble()
             clampScroll()
             onRange?.invoke()
@@ -294,6 +332,7 @@ internal class TextGrid(context: Context) : View(context) {
 
         override fun onScaleEnd(detector: ScaleGestureDetector) {
             onZoom?.invoke(textSizeSp)
+            onColumns?.invoke()
         }
     })
 
@@ -393,6 +432,7 @@ internal class TextGrid(context: Context) : View(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        if (w != oldw) onColumns?.invoke()
         refresh()
     }
 

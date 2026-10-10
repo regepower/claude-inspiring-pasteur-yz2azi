@@ -41,8 +41,8 @@
         <item>Pfeil antippen klappt einen Ordner auf, Namen antippen öffnet ihn auf der nächsten Seite. Oben rechts: Sortieren (Name, Datum, Größe, Typ, auf- oder absteigend) und Filter (Bilder, Videos, Dokumente, Name enthält …; das Symbol ist farbig, solange ein Filter aktiv ist) – beides gilt für die gerade sichtbare Seite. ⋮ oben rechts: neuer Ordner, Ordner zu den Favoriten oder entfernen (Favoriten stehen oben im Baum mit ★), Einstellungen, Hilfe.</item>
         <item>Das Feld links im farbigen Band (z. B. \"Intern ▾\") wählt den Speicher: Intern, SD-Karte, USB, Cloud-Ordner anderer Apps (☁, z. B. Google Drive, über \"Cloud / Laufwerk hinzufügen\") und Netzwerk-Server (🌐). Netzwerk-Server: FTP, FTPS oder WebDAV (z. B. Nextcloud mit Startordner remote.php/dav/files/NAME); \"Im WLAN suchen\" findet Server, die sich im Netz melden. Die Verbindung wird vor dem Speichern getestet, Passwörter werden verschlüsselt gespeichert. Dateien vom Server werden zum Öffnen erst geladen. Rechts im Band steht der Pfad, jeder Teil ist antippbar.</item>
         <item>Ein ZIP- oder 7z-Archiv öffnet sich mit einem Tippen wie ein Ordner (nur lesen), auch im Baum. Einträge markieren und kopieren (oder halten → Entpacken): nur diese werden entpackt, wahlweise in einen Ordner mit dem Archivnamen oder direkt ins Ziel. Eine Datei im Archiv antippen öffnet sie. Archive mit Passwort werden nicht unterstützt.</item>
-        <item>Anzeigen (Text/Hex) öffnet auch sehr große Dateien sofort. Ein Finger scrollt in beide Richtungen, zwei Finger zoomen die Schrift. Wort halten markiert es, die runden Griffe erweitern die Markierung; dann Kopieren, Teilen oder Alles. Oben rechts wechselt zwischen Text und Hex. Zurück hebt zuerst die Markierung auf.</item>
-        <item>Gibt es einen Namen im Ziel schon, fragt die App: Überschreiben (Ordner werden zusammengeführt), Überspringen oder Beide behalten (\"Name (1)\"), auf Wunsch für alle. Kopieren, Verschieben, Löschen, Packen und Entpacken zeigen den Fortschritt und lassen sich abbrechen; eine halb kopierte Datei wird entfernt.</item>
+        <item>Anzeigen (Text/Hex) öffnet auch sehr große Dateien sofort. Ein Finger scrollt in beide Richtungen, zwei Finger zoomen die Schrift. Wort halten markiert es, die runden Griffe erweitern die Markierung; dann Kopieren, Teilen oder Alles. Oben rechts wechselt zwischen Text und Hex; ⋮ schaltet Zeilennummern und Zeilenumbruch (Dateien bis 4 MB) ein und aus. Zurück hebt zuerst die Markierung auf.</item>
+        <item>Gibt es einen Namen im Ziel schon, fragt die App: Überschreiben (Ordner werden zusammengeführt), Überspringen oder Beide behalten (\"Name (1)\"), auf Wunsch für alle. Kopieren, Verschieben, Löschen, Packen und Entpacken zeigen den Fortschritt und lassen sich abbrechen; eine halb kopierte Datei wird entfernt. Danach meldet die App, was getan wurde (z. B. \"3 Elemente nach „Download“ kopiert\").</item>
         <item>⋮ oben rechts → Einstellungen: feste App je Dateityp (ändern oder löschen), Cloud-Ordner hinzufügen oder entfernen, versteckte Dateien zeigen, Vorschaubilder an/aus, Konfiguration speichern und laden (App-Zuordnungen, Favoriten, Einstellungen), Fehlerbericht (letzter Absturz oder Hänger, zum Kopieren oder Teilen).</item>
         <item>Die App braucht \"Zugriff auf alle Dateien\"; beim ersten Start öffnet sich die Systemeinstellung. Es werden keine Daten gesammelt oder gesendet. Ins Netz geht die App nur zu Servern, die du selbst eingetragen hast.</item>
     </string-array>
@@ -176,4 +176,25 @@
     <string name="menu_open">Öffnen</string>
     <string name="menu_archive">Archiv</string>
     <string name="menu_picture">Bild</string>
+    <plurals name="msg_copied">
+        <item quantity="one">%1$d Element nach „%2$s“ kopiert</item>
+        <item quantity="other">%1$d Elemente nach „%2$s“ kopiert</item>
+    </plurals>
+    <plurals name="msg_moved">
+        <item quantity="one">%1$d Element nach „%2$s“ verschoben</item>
+        <item quantity="other">%1$d Elemente nach „%2$s“ verschoben</item>
+    </plurals>
+    <plurals name="msg_deleted">
+        <item quantity="one">%1$d Element gelöscht</item>
+        <item quantity="other">%1$d Elemente gelöscht</item>
+    </plurals>
+    <plurals name="msg_webp">
+        <item quantity="one">%1$d Bild in WebP umgewandelt (%2$s)</item>
+        <item quantity="other">%1$d Bilder in WebP umgewandelt (%2$s)</item>
+    </plurals>
+    <string name="msg_zipped">„%1$s“ in „%2$s“ erstellt</string>
+    <string name="msg_extracted">Entpackt nach „%1$s“</string>
+    <string name="view_numbers">Zeilennummern</string>
+    <string name="view_wrap">Zeilenumbruch</string>
+    <string name="view_wrap_limit">Zeilenumbruch geht bei Dateien bis %1$d MB</string>
 </resources>

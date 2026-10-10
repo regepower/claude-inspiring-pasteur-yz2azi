@@ -157,6 +157,17 @@ class ViewerActivity : Activity() {
             show()
         }
         head.addView(toggle)
+        // ⋮: line numbers and wrapping (text mode)
+        val more = android.widget.ImageButton(this).apply {
+            setImageResource(R.drawable.ic_more)
+            imageTintList = android.content.res.ColorStateList.valueOf(getColor(R.color.md_on_container))
+            val sel = android.util.TypedValue()
+            theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, sel, true)
+            setBackgroundResource(sel.resourceId)
+            contentDescription = getString(R.string.more)
+            setOnClickListener { showOptions(it) }
+        }
+        head.addView(more, LinearLayout.LayoutParams(dp(44), dp(44)))
         root.addView(head)
 
         // Shown while something is marked
@@ -173,14 +184,38 @@ class ViewerActivity : Activity() {
         root.addView(selBar)
 
         grid = TextGrid(this)
-        grid.setColors(getColor(R.color.md_on_surface), getColor(R.color.md_primary) and 0x50FFFFFF, getColor(R.color.md_primary))
+        grid.setColors(
+            getColor(R.color.md_on_surface), getColor(R.color.md_primary) and 0x50FFFFFF, getColor(R.color.md_primary),
+            getColor(R.color.md_surface), getColor(R.color.md_on_surface_variant),
+        )
+        numbers = prefs.getBoolean("viewer_numbers", false)
+        wrap = prefs.getBoolean("viewer_wrap", false)
+        grid.onColumns = { if (wrap && !hex) rebuildWrap() }
         grid.setTextSizeSp(prefs.getFloat("viewer_sp", 13f))
         grid.onZoom = { prefs.edit().putFloat("viewer_sp", it).apply() }
         grid.onSelection = { on -> selBar.visibility = if (on) View.VISIBLE else View.GONE }
         grid.source = object : TextGrid.Source {
-            override fun count() = if (hex) hexRows() else rowCount
-            override fun row(i: Int) = if (hex) hexRow(i) else textRow(i)
-            override fun maxChars() = if (hex) hexWidth() else longestRow + 1
+            override fun count() = when {
+                hex -> hexRows()
+                wrapping() -> wrapCount
+                else -> rowCount
+            }
+            override fun row(i: Int): String = when {
+                hex -> hexRow(i)
+                wrapping() -> cachedRow(wrapRow[i]).let { t -> t.substring(minOf(wrapCol[i], t.length), minOf(wrapCol[i] + wrapCols, t.length)) }
+                else -> cachedRow(i)
+            }
+            override fun maxChars() = when {
+                hex -> hexWidth()
+                wrapping() -> wrapCols
+                else -> longestRow + 1
+            }
+            override fun label(i: Int): String = when {
+                hex || !numbers -> ""
+                wrapping() -> if (wrapCol[i] == 0) (wrapRow[i] + 1).toString() else ""
+                else -> (i + 1).toString()
+            }
+            override fun joinsNext(i: Int) = wrapping() && i + 1 < wrapCount && wrapRow[i + 1] == wrapRow[i]
         }
         vBar = RangeBar(this)
         vBar.vertical = true
@@ -204,10 +239,84 @@ class ViewerActivity : Activity() {
     /** Refreshes counts, width and labels after a mode change or new index data. */
     private fun show() {
         toggle.setText(if (hex) R.string.view_text else R.string.view_hex)
+        grid.gutterChars = if (numbers && !hex) maxOf(2, rowCount.toString().length) else 0
+        if (wrapping() && wrapBuiltFor != rowCount) rebuildWrap()
         val sizeText = Formatter.formatFileSize(this, size)
         info.text = if (hex) getString(R.string.view_info_hex, sizeText)
         else getString(if (indexing) R.string.view_info_reading else R.string.view_info_text, sizeText, rowCount, charset.name())
         grid.refresh()
+    }
+
+    // ---- Line numbers and wrapping ----
+
+    private var numbers = false
+    private var wrap = false
+    private var wrapRow = IntArray(0)   // visual line -> text row
+    private var wrapCol = IntArray(0)   // visual line -> first character in that row
+    private var wrapCount = 0
+    private var wrapCols = 80
+    private var wrapBuiltFor = -1       // rowCount the wrapping was made for
+    private val rowCache = LruCache<Int, String>(256)
+
+    private fun wrapping() = wrap && !hex && size <= WRAP_LIMIT
+
+    private fun cachedRow(i: Int): String = rowCache.get(i) ?: textRow(i).also { rowCache.put(i, it) }
+
+    /** Splits every text row into lines that fit the width (files up to [WRAP_LIMIT]). */
+    private fun rebuildWrap() {
+        if (!wrapping()) return
+        val cols = grid.columns()
+        var rows = IntArray(maxOf(16, rowCount + rowCount / 4))
+        var colsAt = IntArray(rows.size)
+        var n = 0
+        for (r in 0 until rowCount) {
+            val len = cachedRow(r).length
+            var c = 0
+            do {
+                if (n == rows.size) {
+                    rows = rows.copyOf(n * 2)
+                    colsAt = colsAt.copyOf(n * 2)
+                }
+                rows[n] = r
+                colsAt[n] = c
+                n++
+                c += cols
+            } while (c < len)
+        }
+        wrapRow = rows
+        wrapCol = colsAt
+        wrapCount = n
+        wrapCols = cols
+        wrapBuiltFor = rowCount
+        grid.refresh()
+    }
+
+    private fun showOptions(anchor: View) {
+        val menu = android.widget.PopupMenu(this, anchor)
+        menu.menu.add(0, 1, 0, R.string.view_numbers).apply { isCheckable = true; isChecked = numbers; isEnabled = !hex }
+        menu.menu.add(0, 2, 1, R.string.view_wrap).apply { isCheckable = true; isChecked = wrap; isEnabled = !hex }
+        menu.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                1 -> {
+                    numbers = !numbers
+                    prefs.edit().putBoolean("viewer_numbers", numbers).apply()
+                }
+                2 -> {
+                    if (!wrap && size > WRAP_LIMIT) {
+                        Toast.makeText(this, getString(R.string.view_wrap_limit, WRAP_LIMIT / 1_000_000), Toast.LENGTH_LONG).show()
+                        return@setOnMenuItemClickListener true
+                    }
+                    wrap = !wrap
+                    prefs.edit().putBoolean("viewer_wrap", wrap).apply()
+                    wrapBuiltFor = -1
+                    grid.reset()
+                }
+            }
+            show()
+            if (wrapping()) grid.post { rebuildWrap() }
+            true
+        }
+        menu.show()
     }
 
     /** Copies (or shares) the marked text; the toast shows what was copied. */
@@ -395,6 +504,7 @@ class ViewerActivity : Activity() {
         const val EXTRA_NAME = "name"
         private const val BLOCK = 64 * 1024
         private const val MAX_COPY = 2_000_000         // characters that can be copied at once
+        private const val WRAP_LIMIT = 4_000_000L      // wrapping reads every line once: only for files up to this size
         private const val MAX_ROW = 4096               // bytes per text row before it continues
         private const val MAX_ROWS = 4_000_000         // 32 MB of row offsets at most
         private val HEX = "0123456789ABCDEF".toCharArray()

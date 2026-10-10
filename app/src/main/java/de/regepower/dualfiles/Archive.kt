@@ -55,7 +55,7 @@ internal object SevenZip {
  */
 internal object Archive {
     /** Error text resource for a failed run; null means success. */
-    class Result(val error: Int?, val failed: Int = 0)
+    class Result(val error: Int?, val failed: Int = 0, val message: String? = null)   // message: what was done
 
     /** One entry; [index] is its position in the archive, -1 for a folder that only exists implicitly. */
     class Item(val index: Int, val path: String, val isDir: Boolean, val size: Long, val modified: Long) {

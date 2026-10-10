@@ -1301,7 +1301,11 @@ class MainActivity : Activity() {
                     val dst = targetDir()
                     resolveClashes(dst, listOf(name)) { m ->
                         if (m[name] != Clash.SKIP) {
-                            runArchive(R.string.arc_packing) { pr -> Archive.zip(this, items, dst, name, m[name] == Clash.OVERWRITE, pr) }
+                            runArchive(R.string.arc_packing) { pr ->
+                                Archive.zip(this, items, dst, name, m[name] == Clash.OVERWRITE, pr).let {
+                                    if (it.error != null) it else Archive.Result(null, 0, getString(R.string.msg_zipped, name, folderName(dst)))
+                                }
+                            }
                         }
                     }
                 }
@@ -1330,7 +1334,8 @@ class MainActivity : Activity() {
                 val names = items.filter { it.parentFile?.path != dstDir.path }.map { it.name }
                 resolveClashes(dstDir, names) { m ->
                     val run = items.filter { m[it.name] != Clash.SKIP }
-                    execute(if (which == 0) R.string.op_copying else R.string.op_moving, run, false) { f, meter ->
+                    execute(if (which == 0) R.string.op_copying else R.string.op_moving, run, false,
+                        if (which == 0) R.plurals.msg_copied else R.plurals.msg_moved, dstDir) { f, meter ->
                         val ow = m[f.name] == Clash.OVERWRITE
                         if (which == 0) Transfer.copy(this, f, dstDir, ow, meter) else Transfer.move(this, f, dstDir, ow, meter)
                     }
@@ -1338,7 +1343,7 @@ class MainActivity : Activity() {
             }
             else -> AlertDialog.Builder(this)
                 .setMessage(getString(R.string.delete_confirm, items.size))
-                .setPositiveButton(R.string.delete) { _, _ -> execute(R.string.op_deleting, items, true) { f, meter -> Transfer.delete(this, f, meter) } }
+                .setPositiveButton(R.string.delete) { _, _ -> execute(R.string.op_deleting, items, true, R.plurals.msg_deleted, null) { f, meter -> Transfer.delete(this, f, meter) } }
                 .setNegativeButton(R.string.cancel, null)
                 .show()
         }
@@ -1348,7 +1353,7 @@ class MainActivity : Activity() {
      * Runs [op] for each item with the progress dialog: bytes for copy/move, entries for delete ([count]).
      * Cancel stops after the current file; a half-copied file is removed.
      */
-    private fun execute(title: Int, items: List<File>, count: Boolean, op: (File, Meter) -> Boolean) {
+    private fun execute(title: Int, items: List<File>, count: Boolean, done: Int, dst: File?, op: (File, Meter) -> Boolean) {
         runArchive(title, count) { pr ->
             val m = Meter(pr)
             val parts = items.map { if (count) Transfer.count(this, it) else Transfer.size(this, it) }
@@ -1366,9 +1371,16 @@ class MainActivity : Activity() {
                     m.report()
                 }
             }
-            Archive.Result(if (m.cancelled) R.string.arc_cancelled else null, failed)
+            // e.g. "3 Elemente nach „Download“ kopiert"
+            val ok = items.size - failed
+            val msg = resources.getQuantityString(done, ok, ok, dst?.let { folderName(it) } ?: "")
+            Archive.Result(if (m.cancelled) R.string.arc_cancelled else null, failed, msg)
         }
     }
+
+    /** Short name of a folder for messages: the storage name for a root, else the folder name. */
+    private fun folderName(dir: File): String =
+        allRoots().firstOrNull { it.path == dir.path }?.let { rootName(it) } ?: dir.name.ifEmpty { dir.path }
 
 
     /** Asks for a file or folder name; [onName] gets the trimmed, non-empty input. */
@@ -1413,7 +1425,11 @@ class MainActivity : Activity() {
                     else -> selected.map { it.substringAfterLast('/') }
                 }
                 resolveClashes(dst, tops) { m ->
-                    runArchive(R.string.arc_extracting) { pr -> Archive.extract(this, archive, selected, dst, folder, m, pr) }
+                    runArchive(R.string.arc_extracting) { pr ->
+                        Archive.extract(this, archive, selected, dst, folder, m, pr).let {
+                            if (it.error != null) it else Archive.Result(null, 0, getString(R.string.msg_extracted, folder?.let { f -> "${folderName(dst)}/$f" } ?: folderName(dst)))
+                        }
+                    }
                 }
             }
             .setNegativeButton(R.string.cancel, null)
@@ -1481,7 +1497,7 @@ class MainActivity : Activity() {
                 val q = qualities[which]
                 resolveClashes(dst, pictures.map { Webp.targetName(it) }) { m ->
                     val run = pictures.filter { m[Webp.targetName(it)] != Clash.SKIP }
-                    execute(R.string.webp_converting, run, true) { f, _ ->
+                    execute(R.string.webp_converting, run, true, R.plurals.msg_webp, dst) { f, _ ->
                         val ok = Webp.convert(this, f, dst, q, m[Webp.targetName(f)] == Clash.OVERWRITE)
                         // The original goes only after its WebP is safely written
                         ok && (!inPlace || Transfer.delete(this, f))
@@ -1586,8 +1602,9 @@ class MainActivity : Activity() {
                 refreshAll()
                 val err = r.error
                 if (err == null) {
-                    val msg = if (r.failed == 0) getString(R.string.done) else getString(R.string.done_failed, r.failed)
-                    Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+                    val base = r.message ?: getString(R.string.done)
+                    val msg = if (r.failed == 0) base else base + " · " + getString(R.string.done_failed, r.failed)
+                    Toast.makeText(this, msg, if (r.failed == 0) Toast.LENGTH_SHORT else Toast.LENGTH_LONG).show()
                 }
                 else AlertDialog.Builder(this).setMessage(err).setPositiveButton(R.string.help_ok, null).show()
             }
